@@ -6,10 +6,12 @@ import Estoque from './views/Estoque';
 import Contas from './views/Contas';
 import AssistenteIA from './views/AssistenteIA';
 import Agenda from './views/Agenda';
+import Auth from './views/Auth';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('home');
   const [needsUpdate, setNeedsUpdate] = useState(0);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const handleUpdate = () => {
     setNeedsUpdate(prev => prev + 1);
@@ -36,13 +38,17 @@ const App: React.FC = () => {
     }
   };
 
+  if (!isLoggedIn) {
+    return <Auth onLogin={() => setIsLoggedIn(true)} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100 selection:text-blue-900">
 
       {/* Top Bar for Mobile */}
       <div className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md z-40 px-6 py-4 border-b border-slate-100 flex justify-between items-center safe-top">
         <h1 className="text-xl font-bold tracking-tight text-slate-900">
-          AutoEstoque <span className="text-blue-600">Pro</span>
+          Insufilm <span className="text-blue-600">Pro</span>
         </h1>
         <button className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>

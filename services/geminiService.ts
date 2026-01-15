@@ -8,7 +8,7 @@ export const askIA = async (question: string, context: any) => {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: `
-        Você é o assistente inteligente do AutoEstoque Pro.
+        Você é o assistente inteligente do Insufilm Pro.
         Contexto atual da loja: ${JSON.stringify(context)}
         Usuário perguntou: ${question}
         
