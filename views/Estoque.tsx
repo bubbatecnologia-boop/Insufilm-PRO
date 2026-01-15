@@ -1,14 +1,20 @@
 
-import React, { useState } from 'react';
-import { Produto, UnidadeMedida } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Product, ProductType } from '../types';
 import { db } from '../lib/database';
+import { supabase } from '../lib/supabase';
 
 interface EstoqueProps {
-  produtos: Produto[];
+  // onUpdate is less strict now, we handle re-fetching internally, 
+  // but we might keep it if App needs to know.
+  produtos: never[]; // Legacy prop, ignored
   onUpdate: () => void;
 }
 
-const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
+const Estoque: React.FC<EstoqueProps> = ({ onUpdate }) => {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -17,60 +23,118 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
   const [activeFilter, setActiveFilter] = useState('Todos');
 
   const [formData, setFormData] = useState({
-    nome: '',
-    categoria: 'Acessórios',
-    quantidade_atual: 0,
-    preco_venda: 0,
-    preco_custo: 0,
-    alerta_minimo: 5,
-    unidade: 'UN' as UnidadeMedida
+    name: '',
+    type: 'unidade' as ProductType,
+    stock_quantity: 0,
+    min_stock_alert: 5,
+    sale_price: 0,
+    cost_price: 0,
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const fetchProducts = async () => {
+    setLoading(true);
+    const data = await db.getProducts();
+    setProducts(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (editingId) {
-      db.updateProduto(editingId, formData);
-      setEditingId(null);
-    } else {
-      db.addProduto(formData);
+    // Get current user org_id for insert (RLS checks it, but good to be explicit if needed)
+    // Actually, our db.addProduct handles the insert. The RLS policy uses auth.uid()
+    // BUT we need to provide organization_id on INSERT because the column is Not Null.
+    // We can get it from the session or let the helper function do it.
+    // For now, let's fetch the Org ID from the first product or a separate call?
+    // BETTER: The user profile has the org_id. 
+    // Let's assume for this MVP step we fetch it once or rely on a hardcoded "get my org" helper.
+    // UPDATE: db.addProduct needs to know the org_id.
+
+    // Quick Fix: Fetch Org ID from Supabase Profile on the fly or just rely on the stored session?
+    // I'll fetch it inside `handleSubmit` for safety.
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return; // Should not happen
+
+    // Get org_id from profile
+    const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single();
+    if (!profile) {
+      alert("Erro: Perfil sem organização.");
+      return;
     }
 
-    onUpdate();
+    const payload = {
+      organization_id: profile.organization_id,
+      name: formData.name,
+      type: formData.type,
+      stock_quantity: formData.stock_quantity,
+      min_stock_alert: formData.min_stock_alert,
+      cost_price: formData.cost_price,
+      sale_price: formData.sale_price
+    };
+
+    if (editingId) {
+      await db.updateProduct(editingId, payload);
+    } else {
+      await db.addProduct(payload);
+    }
+
+    await fetchProducts(); // Refresh list
+    onUpdate(); // Notify App (optional)
     setIsAdding(false);
     resetForm();
   };
 
   const resetForm = () => {
-    setFormData({ nome: '', categoria: 'Acessórios', quantidade_atual: 0, preco_venda: 0, preco_custo: 0, alerta_minimo: 5, unidade: 'UN' });
+    setFormData({
+      name: '',
+      type: 'unidade',
+      stock_quantity: 0,
+      sale_price: 0,
+      cost_price: 0,
+      min_stock_alert: 5
+    });
     setEditingId(null);
   };
 
-  const handleEdit = (produto: Produto) => {
+  const handleEdit = (product: Product) => {
     setFormData({
-      nome: produto.nome,
-      categoria: produto.categoria,
-      quantidade_atual: produto.quantidade_atual,
-      preco_venda: produto.preco_venda,
-      preco_custo: produto.preco_custo,
-      alerta_minimo: produto.alerta_minimo,
-      unidade: produto.unidade
+      name: product.name,
+      type: product.type,
+      stock_quantity: product.stock_quantity,
+      sale_price: product.sale_price,
+      cost_price: product.cost_price,
+      min_stock_alert: product.min_stock_alert
     });
-    setEditingId(produto.id);
+    setEditingId(product.id);
     setIsAdding(true);
   };
 
   // Filter Logic
-  const filteredProdutos = produtos.filter(p => {
-    const matchesSearch = p.nome.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = activeFilter === 'Todos' ||
-      (activeFilter === 'Películas' && (p.categoria === 'Películas' || p.nome.toLowerCase().includes('insulfilm'))) ||
-      (activeFilter === 'Eletrônicos' && p.categoria === 'Eletrônicos') ||
-      (activeFilter === 'Outros' && !['Películas', 'Eletrônicos'].includes(p.categoria) && !p.nome.toLowerCase().includes('insulfilm'));
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase());
+
+    // Mapped Categories
+    // 'material_metro' -> 'Películas'
+    // 'unidade' -> 'Outros' / 'Acessórios'
+
+    let matchesFilter = true;
+    if (activeFilter === 'Todos') matchesFilter = true;
+    else if (activeFilter === 'Películas') matchesFilter = (p.type === 'material_metro');
+    else if (activeFilter === 'Acessórios') matchesFilter = (p.type === 'unidade');
+
     return matchesSearch && matchesFilter;
   });
 
-  const lowStock = produtos.filter(p => p.quantidade_atual <= p.alerta_minimo);
+  const lowStock = products.filter(p => p.stock_quantity <= p.min_stock_alert);
+
+  if (loading) {
+    return <div className="p-8 text-center text-slate-400">Carregando estoque...</div>;
+  }
 
   return (
     <div className="space-y-6 pb-24">
@@ -94,13 +158,13 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
 
         {/* Filter Chips */}
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-          {['Todos', 'Películas', 'Eletrônicos', 'Outros'].map(filter => (
+          {['Todos', 'Películas', 'Acessórios'].map(filter => (
             <button
               key={filter}
               onClick={() => setActiveFilter(filter)}
               className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${activeFilter === filter
-                  ? 'bg-slate-900 text-white shadow-md'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                ? 'bg-slate-900 text-white shadow-md'
+                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
             >
               {filter}
@@ -109,7 +173,7 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
         </div>
       </div>
 
-      {/* 2. Low Stock Section (Redesigned) */}
+      {/* 2. Low Stock Section */}
       {lowStock.length > 0 && (
         <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
           <div className="flex justify-between items-center px-1">
@@ -120,8 +184,8 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
             {lowStock.map(p => (
               <div key={p.id} className="bg-red-50 p-4 rounded-3xl border border-red-100 flex items-center justify-between">
                 <div>
-                  <h4 className="font-bold text-red-900">{p.nome}</h4>
-                  <p className="text-xs font-bold text-red-400 mt-0.5">RESTAM {p.quantidade_atual} {p.unidade}</p>
+                  <h4 className="font-bold text-red-900">{p.name}</h4>
+                  <p className="text-xs font-bold text-red-400 mt-0.5">RESTAM {p.stock_quantity} {p.type === 'material_metro' ? 'Metros' : 'Un'}</p>
                 </div>
                 <button
                   onClick={() => handleEdit(p)}
@@ -135,37 +199,37 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
         </div>
       )}
 
-      {/* 3. Main Product List (Redesigned) */}
+      {/* 3. Main Product List */}
       <div className="space-y-3">
-        {filteredProdutos.length === 0 ? (
+        {filteredProducts.length === 0 ? (
           <div className="text-center py-12 opacity-50">
             <p className="font-medium text-slate-400">Nenhum produto encontrado</p>
           </div>
         ) : (
-          filteredProdutos.map(p => (
+          filteredProducts.map(p => (
             <div key={p.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 active:scale-[0.99] transition-transform" onClick={() => handleEdit(p)}>
 
-              {/* Large Icon */}
+              {/* Icon */}
               <div className="w-14 h-14 bg-slate-50 rounded-2xl flex-shrink-0 flex items-center justify-center text-slate-400 border border-slate-100">
-                {p.unidade === 'MT' ? (
-                  // Ruler/Roll Icon for Meters
+                {p.type === 'material_metro' ? (
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" /><path d="m14.5 12.5 2-2" /><path d="m11.5 9.5 2-2" /><path d="m8.5 6.5 2-2" /><path d="m17.5 15.5 2-2" /></svg>
                 ) : (
-                  // Cube/Box Icon for Units
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" /></svg>
                 )}
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-800 text-base truncate">{p.nome}</h3>
-                <p className="text-xs text-slate-500 font-medium">R$ {p.preco_venda.toFixed(2)}</p>
+                <h3 className="font-bold text-slate-800 text-base truncate">{p.name}</h3>
+                <p className="text-xs text-slate-500 font-medium">R$ {p.sale_price.toFixed(2)}</p>
               </div>
 
-              {/* Quantity Highlight */}
+              {/* Quantity */}
               <div className="text-right flex flex-col items-end">
-                <span className="text-2xl font-bold text-slate-800 leading-none">{p.quantidade_atual}</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">{p.unidade}</span>
+                <span className="text-2xl font-bold text-slate-800 leading-none">{p.stock_quantity}</span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                  {p.type === 'material_metro' ? 'MT' : 'UN'}
+                </span>
               </div>
 
             </div>
@@ -184,7 +248,7 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
       </button>
 
-      {/* Modal Form logic stays similar, rendered centrally */}
+      {/* Modal Form */}
       {isAdding && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 animate-in fade-in">
           <form onSubmit={handleSubmit} className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 animate-in slide-in-from-bottom-10">
@@ -201,8 +265,8 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
                 required
                 autoFocus
                 className="w-full text-lg font-bold border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-slate-800 placeholder-slate-300 transition-colors"
-                value={formData.nome}
-                onChange={e => setFormData({ ...formData, nome: e.target.value })}
+                value={formData.name}
+                onChange={e => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Nome do item..."
               />
             </div>
@@ -213,22 +277,26 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
                 <input
                   type="number"
                   required
+                  step="0.01" // Enable decimals for meters
                   className="w-full p-3 mt-1 bg-slate-50 text-center font-bold text-slate-700 rounded-xl outline-none focus:ring-2 ring-blue-100"
-                  value={formData.quantidade_atual}
-                  onChange={e => setFormData({ ...formData, quantidade_atual: parseFloat(e.target.value) })}
+                  value={formData.stock_quantity}
+                  onChange={e => setFormData({ ...formData, stock_quantity: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Unidade</label>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tipo</label>
                 <div className="flex bg-slate-100 p-1 rounded-xl mt-1">
-                  {['UN', 'MT'].map(u => (
+                  {[
+                    { val: 'unidade' as ProductType, label: 'UN' },
+                    { val: 'material_metro' as ProductType, label: 'MT' }
+                  ].map(u => (
                     <button
-                      key={u}
+                      key={u.val}
                       type="button"
-                      onClick={() => setFormData({ ...formData, unidade: u as UnidadeMedida })}
-                      className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.unidade === u ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
+                      onClick={() => setFormData({ ...formData, type: u.val })}
+                      className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.type === u.val ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
                     >
-                      {u}
+                      {u.label}
                     </button>
                   ))}
                 </div>
@@ -240,18 +308,20 @@ const Estoque: React.FC<EstoqueProps> = ({ produtos, onUpdate }) => {
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Custo</label>
                 <input
                   type="number"
+                  step="0.01"
                   className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-600 font-medium"
-                  value={formData.preco_custo}
-                  onChange={e => setFormData({ ...formData, preco_custo: parseFloat(e.target.value) })}
+                  value={formData.cost_price}
+                  onChange={e => setFormData({ ...formData, cost_price: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Venda</label>
                 <input
                   type="number"
+                  step="0.01"
                   className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-800 font-bold"
-                  value={formData.preco_venda}
-                  onChange={e => setFormData({ ...formData, preco_venda: parseFloat(e.target.value) })}
+                  value={formData.sale_price}
+                  onChange={e => setFormData({ ...formData, sale_price: parseFloat(e.target.value) })}
                 />
               </div>
             </div>

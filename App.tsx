@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Produto, Conta, Venda } from './types';
-import { db } from './lib/database';
+import { View } from './types';
+import { supabase } from './lib/supabase';
+// import { db } from './lib/database';
 import Home from './views/Home';
 import Estoque from './views/Estoque';
 import Contas from './views/Contas';
@@ -11,26 +12,41 @@ import Auth from './views/Auth';
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('home');
   const [needsUpdate, setNeedsUpdate] = useState(0);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Check active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleUpdate = () => {
     setNeedsUpdate(prev => prev + 1);
   };
 
-  // The original useEffect for loading data is replaced by direct calls in renderView
-  // and the needsUpdate mechanism for re-rendering components that fetch data.
-  // No explicit useEffect for data loading is needed here anymore.
-
   const renderView = () => {
+    // Temporary: Passing mock or empty props until Views are refactored
     switch (currentView) {
       case 'home':
         return <Home key={needsUpdate} onNavigate={setCurrentView} onUpdate={handleUpdate} />;
       case 'agenda':
         return <Agenda onUpdate={handleUpdate} />;
       case 'estoque':
-        return <Estoque key={needsUpdate} produtos={db.getProdutos()} onUpdate={handleUpdate} />;
+        return <Estoque key={needsUpdate} produtos={[]} onUpdate={handleUpdate} />; // Fixed for compiling
       case 'contas':
-        return <Contas key={needsUpdate} contas={db.getContas()} templates={db.getTemplates()} onUpdate={handleUpdate} />;
+        return <Contas key={needsUpdate} contas={[]} templates={[]} onUpdate={handleUpdate} />; // Fixed for compiling
       case 'ia':
         return <AssistenteIA />;
       default:
@@ -38,8 +54,12 @@ const App: React.FC = () => {
     }
   };
 
-  if (!isLoggedIn) {
-    return <Auth onLogin={() => setIsLoggedIn(true)} />;
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">Carregando...</div>;
+  }
+
+  if (!session) {
+    return <Auth onLogin={() => { }} />; // Session update handles the flow now
   }
 
   return (

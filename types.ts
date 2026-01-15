@@ -1,64 +1,71 @@
 
-export type UnidadeMedida = 'UN' | 'MT';
+export type ProductType = 'material_metro' | 'unidade';
+export type AppointmentStatus = 'pending' | 'confirmed' | 'completed' | 'canceled';
+export type TransactionType = 'income' | 'expense';
+export type TransactionStatus = 'paid' | 'pending';
+export type UserRole = 'admin' | 'member';
 
-export interface Produto {
+export interface Organization {
   id: string;
-  nome: string;
-  foto?: string;
-  categoria: string;
-  quantidade_atual: number;
-  preco_venda: number;
-  preco_custo: number;
-  alerta_minimo: number;
-  unidade: UnidadeMedida;
+  name: string;
+  slug: string;
+  created_at: string;
 }
 
-export interface Venda {
+export interface Profile {
   id: string;
-  produto_id: string;
-  produto_nome: string;
-  quantidade: number;
-  valor_total: number;
-  lucro: number;
-  forma_pagamento: 'Dinheiro' | 'Pix' | 'Cartão';
-  data: string;
+  organization_id: string;
+  full_name: string;
+  role: UserRole;
+  created_at: string;
 }
 
-export interface ContaTemplate {
+export interface Product {
   id: string;
-  nome: string;
-  dia_vencimento: number;
-  categoria: string;
-  tipo: 'Fixa' | 'Variavel';
-  valor_padrao?: number; // Usado se tipo == 'Fixa'
+  organization_id: string;
+  name: string;
+  type: ProductType;
+  stock_quantity: number;
+  min_stock_alert: number;
+  cost_price: number;
+  sale_price: number;
+  created_at: string;
 }
 
-export interface Conta {
+export interface Client {
   id: string;
-  template_id?: string;
-  nome: string;
-  valor: number;
-  data_vencimento: string; // YYYY-MM-DD
-  pago: boolean;
-  necessita_valor: boolean; // True se for variável e ainda não tiver valor definido
-  categoria?: string;
-  data_pagamento?: string;
-  tipo?: 'Despesa' | 'Conta'; // Para diferenciar no histórico
+  organization_id: string;
+  name: string;
+  phone?: string;
+  car_model?: string;
+  notes?: string;
+  created_at: string;
 }
 
-export interface Agendamento {
+export interface Appointment {
   id: string;
-  data: string; // YYYY-MM-DD
-  horario: string; // HH:00
-  cliente: string;
-  veiculo: string;
-  servico: string;
-  contato?: string;
-  valor?: number; // Preço do serviço
-  produto_id?: string; // ID do produto reservado do estoque
-  pago?: boolean; // Se já foi pago (venda vinculada)
-  venda_id?: string; // ID da venda se houver
-  status: 'Pendente' | 'Executando' | 'Concluido';
+  organization_id: string;
+  client_id?: string;
+  title: string;
+  start_time: string; // ISO String
+  end_time: string;   // ISO String
+  status: AppointmentStatus;
+  price_total: number;
+  created_at: string;
+  // Joins (Optional)
+  client?: Client;
+}
+
+export interface Transaction {
+  id: string;
+  organization_id: string;
+  description: string;
+  amount: number;
+  type: TransactionType;
+  status: TransactionStatus;
+  due_date?: string; // YYYY-MM-DD
+  payment_method?: string;
+  created_at: string;
 }
 
 export type View = 'home' | 'agenda' | 'estoque' | 'contas' | 'ia';
