@@ -20,7 +20,8 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
     description: '',
     amount: '',
     dueDateDay: 10,
-    category: 'Outros'
+    category: 'Outros',
+    type: 'Fixa' as 'Fixa' | 'Variavel' // Added Type: Fixed or Variable
   });
 
   // States for "Lançar Gasto" (Immediate Expense)
@@ -32,6 +33,10 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
 
   const [animatingPaymentId, setAnimatingPaymentId] = useState<string | null>(null);
 
+  // States for Editing Value of Pending "Variable" bills
+  const [editingValueId, setEditingValueId] = useState<string | null>(null);
+  const [tempValue, setTempValue] = useState('');
+
   useEffect(() => {
     loadTransactions();
   }, []);
@@ -39,7 +44,6 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
   const loadTransactions = async () => {
     setLoading(true);
     const data = await db.getTransactions();
-    // We might want to filter by month later, for now load all to show history/pending
     setTransactions(data);
     setLoading(false);
   };
@@ -52,62 +56,55 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
   }
 
   const togglePago = async (t: Transaction) => {
-    // 1. Start Animation
     setAnimatingPaymentId(t.id);
-
-    // 2. Wait for animation
     await new Promise(resolve => setTimeout(resolve, 500));
-
-    // 3. Update DB
     await db.updateTransaction(t.id, { status: 'completed' });
-
-    // 4. Refresh
     await loadTransactions();
     onUpdate();
-
-    // 5. Reset
     setAnimatingPaymentId(null);
   };
+
+  const handleUpdateValor = async (id: string) => {
+    if (!tempValue) return;
+    await db.updateTransaction(id, { amount: parseFloat(tempValue) });
+    setEditingValueId(null);
+    setTempValue('');
+    loadTransactions();
+    onUpdate();
+  }
 
   const handleAddBill = async (e: React.FormEvent) => {
     e.preventDefault();
     const orgId = await getOrgId();
     if (!orgId) return;
 
-    // Calculate Due Date: YYYY-MM-DD
     const today = new Date();
-    const targetMonth = today.getMonth(); // 0-indexed
+    const targetMonth = today.getMonth();
     const targetYear = today.getFullYear();
-
-    // Construct Date Object
-    // Note: JS Date month is 0-indexed
-    // We create a date for the CURRENT month with the specified day.
-    // If that date is in the past, maybe the user means next month?
-    // For simplicity, let's just stick to current month.
     const dueDate = new Date(targetYear, targetMonth, newBill.dueDateDay);
 
-    // Format to YYYY-MM-DD using local time logic (simple slice)
-    // Beware of timezone shifts if using toISOString() on a local date object constructed like above.
-    // Better: explicit string construction.
     const year = dueDate.getFullYear();
     const month = String(dueDate.getMonth() + 1).padStart(2, '0');
     const day = String(dueDate.getDate()).padStart(2, '0');
     const dateStr = `${year}-${month}-${day}`;
 
+    // Logic: If Variable, amount is 0 (signaling "Needs Value")
+    const finalAmount = newBill.type === 'Fixa' ? (parseFloat(newBill.amount) || 0) : 0;
+
     await db.addTransaction({
       organization_id: orgId,
       description: newBill.description,
-      amount: parseFloat(newBill.amount) || 0,
+      amount: finalAmount,
       type: 'expense',
       category: newBill.category,
       date: dateStr,
-      status: 'pending' // It is a bill to pay
+      status: 'pending'
     });
 
     await loadTransactions();
     onUpdate();
     setIsAddingBill(false);
-    setNewBill({ description: '', amount: '', dueDateDay: 10, category: 'Outros' });
+    setNewBill({ description: '', amount: '', dueDateDay: 10, category: 'Outros', type: 'Fixa' });
   };
 
   const handleAddExpense = async (e: React.FormEvent) => {
@@ -129,8 +126,8 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
       amount: parseFloat(newExpense.amount),
       type: 'expense',
       category: newExpense.category,
-      date: dateStr, // Today
-      status: 'completed' // Paid immediately
+      date: dateStr,
+      status: 'completed'
     });
 
     await loadTransactions();
@@ -148,14 +145,13 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
     }
   };
 
-  // Filters
   const pending = transactions.filter(t => t.status === 'pending');
   const completed = transactions.filter(t => t.status === 'completed');
 
   return (
     <div className="space-y-6 pb-20">
 
-      {/* 1. Header de Ações (Clean & Modern) */}
+      {/* 1. Header de Ações */}
       <div className="flex gap-3 pt-2">
         <button
           onClick={() => setIsAddingExpense(!isAddingExpense)}
@@ -177,7 +173,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
         </button>
       </div>
 
-      {/* 2. Abas Segmented Control (Clean) */}
+      {/* 2. Abas Segmented Control */}
       <div className="bg-slate-100 p-1 rounded-2xl flex gap-1">
         <button
           onClick={() => setActiveTab('pagar')}
@@ -198,71 +194,39 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
       {/* Expense Modal (Form) */}
       {isAddingExpense && (
         <div className="bg-white p-6 rounded-3xl border border-amber-100 shadow-xl space-y-5 animate-in slide-in-from-top-4 relative overflow-hidden max-w-md mx-auto w-full">
+          {/* ... (Expense Form UI remains same) ... */}
           <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div>
           <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
             <span className="w-2 h-2 rounded-full bg-amber-500"></span>
             Novo Gasto Extra
           </h3>
-
           <form onSubmit={handleAddExpense} className="space-y-5">
+            {/* ... Inputs ... */}
             <div>
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Quanto custou? (R$)</label>
-              <input
-                autoFocus
-                type="number"
-                step="0.01"
-                required
-                className="w-full text-4xl font-black text-slate-800 placeholder-slate-200 outline-none border-b-2 border-slate-100 pb-2 focus:border-amber-400 transition-colors mt-1"
-                placeholder="0,00"
-                value={newExpense.amount}
-                onChange={e => setNewExpense({ ...newExpense, amount: e.target.value })}
-              />
+              <input autoFocus type="number" step="0.01" required className="w-full text-4xl font-black text-slate-800 placeholder-slate-200 outline-none border-b-2 border-slate-100 pb-2 focus:border-amber-400 transition-colors mt-1" placeholder="0,00" value={newExpense.amount} onChange={e => setNewExpense({ ...newExpense, amount: e.target.value })} />
             </div>
-
             <div>
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">O que você comprou?</label>
-              <input
-                required
-                className="w-full p-3 mt-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition-all font-medium text-slate-700 placeholder-slate-300"
-                placeholder="Ex: Almoço, Peça do carro..."
-                value={newExpense.description}
-                onChange={e => setNewExpense({ ...newExpense, description: e.target.value })}
-              />
+              <input required className="w-full p-3 mt-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition-all font-medium text-slate-700 placeholder-slate-300" placeholder="Ex: Almoço..." value={newExpense.description} onChange={e => setNewExpense({ ...newExpense, description: e.target.value })} />
             </div>
-
             <div>
               <label className="text-xs font-bold text-slate-400 uppercase mb-3 block tracking-wider">Tipo de Gasto</label>
               <div className="flex flex-wrap gap-2">
                 {['Alimentação', 'Material', 'Transporte', 'Outros'].map(cat => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setNewExpense({ ...newExpense, category: cat })}
-                    className={`px-4 py-2 rounded-full text-xs font-bold border transition-all active:scale-95 ${newExpense.category === cat ? 'bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
-                  >
-                    {cat}
-                  </button>
+                  <button key={cat} type="button" onClick={() => setNewExpense({ ...newExpense, category: cat })} className={`px-4 py-2 rounded-full text-xs font-bold border transition-all active:scale-95 ${newExpense.category === cat ? 'bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>{cat}</button>
                 ))}
               </div>
             </div>
-
             <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={() => setIsAddingExpense(false)}
-                className="flex-1 py-3.5 text-slate-500 font-bold text-sm hover:bg-slate-50 rounded-xl transition-colors"
-              >
-                Cancelar
-              </button>
-              <button type="submit" className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl font-bold shadow-xl shadow-slate-200 active:scale-95 transition-all hover:bg-slate-800">
-                Salvar Gasto
-              </button>
+              <button type="button" onClick={() => setIsAddingExpense(false)} className="flex-1 py-3.5 text-slate-500 font-bold text-sm hover:bg-slate-50 rounded-xl transition-colors">Cancelar</button>
+              <button type="submit" className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl font-bold shadow-xl shadow-slate-200 active:scale-95 transition-all hover:bg-slate-800">Salvar Gasto</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Bill Modal (Form) */}
+      {/* Bill Modal (Form with Features Restored) */}
       {isAddingBill && (
         <form onSubmit={handleAddBill} className="bg-white p-6 rounded-3xl border border-blue-50 shadow-xl space-y-5 animate-in slide-in-from-top-4 relative overflow-hidden max-w-md mx-auto w-full">
           <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500"></div>
@@ -282,6 +246,29 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
             />
           </div>
 
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase mb-3 block tracking-wider">O valor muda todo mês?</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setNewBill({ ...newBill, type: 'Fixa' })}
+                className={`p-3 rounded-xl border-2 text-left transition-all relative overflow-hidden ${newBill.type === 'Fixa' ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
+              >
+                <span className={`block text-xs font-bold mb-0.5 ${newBill.type === 'Fixa' ? 'text-blue-600' : 'text-slate-400'}`}>Valor Fixo</span>
+                <span className="block text-sm font-bold text-slate-700">Não muda</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNewBill({ ...newBill, type: 'Variavel' })}
+                className={`p-3 rounded-xl border-2 text-left transition-all relative overflow-hidden ${newBill.type === 'Variavel' ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
+              >
+                <span className={`block text-xs font-bold mb-0.5 ${newBill.type === 'Variavel' ? 'text-blue-600' : 'text-slate-400'}`}>Valor Variável</span>
+                <span className="block text-sm font-bold text-slate-700">Muda todo mês</span>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-1">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Dia Venc.</label>
@@ -295,13 +282,16 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
               />
             </div>
             <div className="col-span-1">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Valor Estimado</label>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                {newBill.type === 'Fixa' ? 'Valor Padrão' : 'Estimativa check'}
+              </label>
               <input
                 type="number"
-                className={`w-full p-3 mt-2 border rounded-xl outline-none transition-colors font-bold text-center bg-white text-slate-700 border-slate-200 focus:border-blue-500`}
+                disabled={newBill.type === 'Variavel'}
+                className={`w-full p-3 mt-2 border rounded-xl outline-none transition-colors font-bold text-center ${newBill.type === 'Variavel' ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed' : 'bg-white text-slate-700 border-slate-200 focus:border-blue-500'}`}
                 value={newBill.amount}
                 onChange={e => setNewBill({ ...newBill, amount: e.target.value })}
-                placeholder="0.00"
+                placeholder={newBill.type === 'Variavel' ? '---' : '0.00'}
               />
             </div>
           </div>
@@ -313,7 +303,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
         </form>
       )}
 
-      {/* 3. Cards de Contas (Redesign) */}
+      {/* 3. Cards de Contas */}
       {activeTab === 'pagar' && (
         <div className="space-y-4">
           {pending.length === 0 ? (
@@ -329,12 +319,13 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
                 const hoje = new Date().toISOString().split('T')[0];
                 const vencida = c.date < hoje;
                 const isHoje = c.date === hoje;
+                const isVariableNeedValue = c.amount === 0;
 
                 // Semantic Logic
                 let accentBorder = "border-slate-300"; // Default Future
                 let statusColor = "text-slate-500";
 
-                if (c.amount === 0) {
+                if (isVariableNeedValue) {
                   accentBorder = "border-amber-400";
                   statusColor = "text-amber-600";
                 } else if (vencida) {
@@ -344,7 +335,6 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
                   accentBorder = "border-orange-500";
                   statusColor = "text-orange-600";
                 } else {
-                  // Future bills
                   accentBorder = "border-blue-500";
                   statusColor = "text-blue-600";
                 }
@@ -363,38 +353,67 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
                         {isAnimating ? 'PAGO COM SUCESSO!' : c.description}
                       </h4>
                       <p className={`text-xs font-bold mt-1 uppercase tracking-wide flex items-center gap-1.5 ${isAnimating ? 'hidden' : statusColor}`}>
-                        {!isAnimating && vencida && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
-                        {!isAnimating && isHoje && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>}
+                        {!isAnimating && vencida && !isVariableNeedValue && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
+                        {!isAnimating && isHoje && !isVariableNeedValue && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>}
 
                         {!isAnimating && (
-                          isHoje ? 'Vence Hoje!' :
-                            vencida ? `Venceu dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}` :
-                              `Vence dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}`
+                          isVariableNeedValue ? 'Aguardando Valor' :
+                            isHoje ? 'Vence Hoje!' :
+                              vencida ? `Venceu dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}` :
+                                `Vence dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}`
                         )}
                       </p>
                     </div>
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-4">
-                      <>
-                        {!isAnimating && (
-                          <span className={`font-black text-base ${vencida ? 'text-red-600' : 'text-slate-700'}`}>
-                            R$ {c.amount.toFixed(2)}
-                          </span>
-                        )}
 
-                        <button
-                          onClick={() => togglePago(c)}
-                          disabled={isAnimating}
-                          className={`rounded-full flex items-center justify-center text-white shadow-md transition-all duration-500 ease-out
+                      {/* Case 1: Variable / Needs Value */}
+                      {isVariableNeedValue ? (
+                        editingValueId === c.id ? (
+                          <div className="flex items-center gap-2 animate-in slide-in-from-right">
+                            <input
+                              autoFocus
+                              type="number"
+                              className="w-24 p-2 bg-white border-2 border-amber-200 rounded-lg text-lg outline-none font-bold text-slate-800 text-center shadow-sm focus:border-amber-400"
+                              placeholder="R$?"
+                              value={tempValue}
+                              onChange={e => setTempValue(e.target.value)}
+                            />
+                            <button onClick={() => handleUpdateValor(c.id)} className="bg-amber-500 text-white w-10 h-10 rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-transform">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingValueId(c.id)}
+                            className="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg text-sm font-bold border border-amber-200 shadow-sm hover:bg-amber-100 hover:shadow-md transition-all active:scale-95"
+                          >
+                            Definir Valor
+                          </button>
+                        )
+                      ) : (
+                        // Case 2: Defined Value
+                        <>
+                          {!isAnimating && (
+                            <span className={`font-black text-base ${vencida ? 'text-red-600' : 'text-slate-700'}`}>
+                              R$ {c.amount.toFixed(2)}
+                            </span>
+                          )}
+
+                          <button
+                            onClick={() => togglePago(c)}
+                            disabled={isAnimating}
+                            className={`rounded-full flex items-center justify-center text-white shadow-md transition-all duration-500 ease-out
                               ${isAnimating
-                              ? 'w-12 h-12 bg-green-500 rotate-[360deg] scale-125'
-                              : `w-10 h-10 active:scale-90 hover:scale-105 bg-emerald-500 shadow-emerald-200`
-                            }`}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width={isAnimating ? 24 : 20} height={isAnimating ? 24 : 20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                        </button>
-                      </>
+                                ? 'w-12 h-12 bg-green-500 rotate-[360deg] scale-125'
+                                : `w-10 h-10 active:scale-90 hover:scale-105 bg-emerald-500 shadow-emerald-200`
+                              }`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width={isAnimating ? 24 : 20} height={isAnimating ? 24 : 20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -404,7 +423,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
         </div>
       )}
 
-      {/* 4. Lista Histórico (Clean) */}
+      {/* 4. Lista Histórico */}
       {activeTab === 'historico' && (
         <div className="space-y-4">
           {completed.length === 0 ? (
@@ -435,13 +454,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
 
                     <div className="flex items-center gap-3">
                       <span className="font-bold text-slate-700 text-sm opacity-90 block">R$ {c.amount.toFixed(2)}</span>
-
-                      <button
-                        onClick={() => handleDelete(c.id)}
-                        className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
-                      </button>
+                      <button onClick={() => handleDelete(c.id)} className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg></button>
                     </div>
                   </div>
                 );
