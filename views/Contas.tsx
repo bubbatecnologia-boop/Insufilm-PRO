@@ -1,100 +1,156 @@
-
-import React, { useState } from 'react';
-import { Conta, ContaTemplate } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Transaction } from '../types';
 import { db } from '../lib/database';
+import { supabase } from '../lib/supabase';
 
 interface ContasProps {
-  contas: Conta[];
   onUpdate: () => void;
 }
 
-const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
+const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
   const [activeTab, setActiveTab] = useState<'pagar' | 'historico'>('pagar');
-  const [isAddingTemplate, setIsAddingTemplate] = useState(false);
-  const [isAddingExpense, setIsAddingExpense] = useState(false);
+  const [isAddingBill, setIsAddingBill] = useState(false); // Nova Conta (Future)
+  const [isAddingExpense, setIsAddingExpense] = useState(false); // Gasto (Now)
 
-  // States for Template Form
-  const [newTemplate, setNewTemplate] = useState({
-    nome: '',
-    dia_vencimento: 10,
-    categoria: 'Outros',
-    tipo: 'Fixa' as 'Fixa' | 'Variavel',
-    valor_padrao: 0
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // States for "Nova Conta" (Pending Bill)
+  const [newBill, setNewBill] = useState({
+    description: '',
+    amount: '',
+    dueDateDay: 10,
+    category: 'Outros'
   });
 
-  // States for Expense Form
+  // States for "Lançar Gasto" (Immediate Expense)
   const [newExpense, setNewExpense] = useState({
-    valor: '',
-    descricao: '',
-    categoria: 'Alimentação'
+    amount: '',
+    description: '',
+    category: 'Alimentação'
   });
 
-  const [editingValueId, setEditingValueId] = useState<string | null>(null);
-  const [tempValue, setTempValue] = useState('');
   const [animatingPaymentId, setAnimatingPaymentId] = useState<string | null>(null);
 
-  const togglePago = async (id: string) => {
+  useEffect(() => {
+    loadTransactions();
+  }, []);
+
+  const loadTransactions = async () => {
+    setLoading(true);
+    const data = await db.getTransactions();
+    // We might want to filter by month later, for now load all to show history/pending
+    setTransactions(data);
+    setLoading(false);
+  };
+
+  const getOrgId = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single();
+    return data?.organization_id;
+  }
+
+  const togglePago = async (t: Transaction) => {
     // 1. Start Animation
-    setAnimatingPaymentId(id);
+    setAnimatingPaymentId(t.id);
 
     // 2. Wait for animation
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // 3. Update DB
-    db.toggleContaPaga(id);
+    await db.updateTransaction(t.id, { status: 'completed' });
+
+    // 4. Refresh
+    await loadTransactions();
     onUpdate();
 
-    // 4. Reset
+    // 5. Reset
     setAnimatingPaymentId(null);
   };
 
-  const handleUpdateValor = (id: string) => {
-    if (!tempValue) return;
-    db.updateValorConta(id, parseFloat(tempValue));
+  const handleAddBill = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const orgId = await getOrgId();
+    if (!orgId) return;
+
+    // Calculate Due Date: YYYY-MM-DD
+    const today = new Date();
+    const targetMonth = today.getMonth(); // 0-indexed
+    const targetYear = today.getFullYear();
+
+    // Construct Date Object
+    // Note: JS Date month is 0-indexed
+    // We create a date for the CURRENT month with the specified day.
+    // If that date is in the past, maybe the user means next month?
+    // For simplicity, let's just stick to current month.
+    const dueDate = new Date(targetYear, targetMonth, newBill.dueDateDay);
+
+    // Format to YYYY-MM-DD using local time logic (simple slice)
+    // Beware of timezone shifts if using toISOString() on a local date object constructed like above.
+    // Better: explicit string construction.
+    const year = dueDate.getFullYear();
+    const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+    const day = String(dueDate.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+
+    await db.addTransaction({
+      organization_id: orgId,
+      description: newBill.description,
+      amount: parseFloat(newBill.amount) || 0,
+      type: 'expense',
+      category: newBill.category,
+      date: dateStr,
+      status: 'pending' // It is a bill to pay
+    });
+
+    await loadTransactions();
     onUpdate();
-    setEditingValueId(null);
-    setTempValue('');
+    setIsAddingBill(false);
+    setNewBill({ description: '', amount: '', dueDateDay: 10, category: 'Outros' });
   };
 
-  const handleAddTemplate = (e: React.FormEvent) => {
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    db.addContaTemplate({
-      nome: newTemplate.nome,
-      dia_vencimento: newTemplate.dia_vencimento,
-      categoria: newTemplate.categoria,
-      tipo: newTemplate.tipo,
-      valor_padrao: newTemplate.tipo === 'Fixa' ? newTemplate.valor_padrao : undefined
+    if (!newExpense.amount || !newExpense.description) return;
+
+    const orgId = await getOrgId();
+    if (!orgId) return;
+
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+
+    await db.addTransaction({
+      organization_id: orgId,
+      description: newExpense.description,
+      amount: parseFloat(newExpense.amount),
+      type: 'expense',
+      category: newExpense.category,
+      date: dateStr, // Today
+      status: 'completed' // Paid immediately
     });
-    onUpdate();
-    setIsAddingTemplate(false);
-    setNewTemplate({ nome: '', dia_vencimento: 10, categoria: 'Outros', tipo: 'Fixa', valor_padrao: 0 });
-  };
 
-  const handleAddExpense = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newExpense.valor || !newExpense.descricao) return;
-
-    db.registrarDespesa({
-      nome: newExpense.descricao,
-      valor: parseFloat(newExpense.valor),
-      categoria: newExpense.categoria
-    });
-
+    await loadTransactions();
     onUpdate();
     setIsAddingExpense(false);
-    setNewExpense({ valor: '', descricao: '', categoria: 'Alimentação' });
-    setActiveTab('historico'); // Go to history to see the new expense
+    setNewExpense({ amount: '', description: '', category: 'Alimentação' });
+    setActiveTab('historico');
   };
 
-  const aPagar = contas.filter(c => !c.pago);
-  const historico = contas.filter(c => c.pago).sort((a, b) => new Date(b.data_vencimento).getTime() - new Date(a.data_vencimento).getTime());
-
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir este registro?')) {
-      db.deleteConta(id);
+      await db.deleteTransaction(id);
+      loadTransactions();
       onUpdate();
     }
   };
+
+  // Filters
+  const pending = transactions.filter(t => t.status === 'pending');
+  const completed = transactions.filter(t => t.status === 'completed');
 
   return (
     <div className="space-y-6 pb-20">
@@ -111,7 +167,7 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
           Lançar Gasto
         </button>
         <button
-          onClick={() => setIsAddingTemplate(!isAddingTemplate)}
+          onClick={() => setIsAddingBill(!isAddingBill)}
           className="flex-1 h-12 flex items-center justify-center gap-2 rounded-xl bg-blue-600 text-white font-bold text-sm shadow-md shadow-blue-200 active:scale-95 transition-transform"
         >
           <div className="bg-white/20 p-1.5 rounded-lg">
@@ -128,7 +184,7 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
           className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 flex flex-col items-center gap-0.5 ${activeTab === 'pagar' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
         >
           <span>Em Aberto</span>
-          {aPagar.length > 0 && <span className="bg-red-50 text-red-600 px-1.5 rounded-md text-[10px]">{aPagar.length}</span>}
+          {pending.length > 0 && <span className="bg-red-50 text-red-600 px-1.5 rounded-md text-[10px]">{pending.length}</span>}
         </button>
         <button
           onClick={() => setActiveTab('historico')}
@@ -158,8 +214,8 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
                 required
                 className="w-full text-4xl font-black text-slate-800 placeholder-slate-200 outline-none border-b-2 border-slate-100 pb-2 focus:border-amber-400 transition-colors mt-1"
                 placeholder="0,00"
-                value={newExpense.valor}
-                onChange={e => setNewExpense({ ...newExpense, valor: e.target.value })}
+                value={newExpense.amount}
+                onChange={e => setNewExpense({ ...newExpense, amount: e.target.value })}
               />
             </div>
 
@@ -169,8 +225,8 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
                 required
                 className="w-full p-3 mt-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition-all font-medium text-slate-700 placeholder-slate-300"
                 placeholder="Ex: Almoço, Peça do carro..."
-                value={newExpense.descricao}
-                onChange={e => setNewExpense({ ...newExpense, descricao: e.target.value })}
+                value={newExpense.description}
+                onChange={e => setNewExpense({ ...newExpense, description: e.target.value })}
               />
             </div>
 
@@ -181,8 +237,8 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
                   <button
                     key={cat}
                     type="button"
-                    onClick={() => setNewExpense({ ...newExpense, categoria: cat })}
-                    className={`px-4 py-2 rounded-full text-xs font-bold border transition-all active:scale-95 ${newExpense.categoria === cat ? 'bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
+                    onClick={() => setNewExpense({ ...newExpense, category: cat })}
+                    className={`px-4 py-2 rounded-full text-xs font-bold border transition-all active:scale-95 ${newExpense.category === cat ? 'bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-200' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}
                   >
                     {cat}
                   </button>
@@ -206,47 +262,24 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
         </div>
       )}
 
-      {/* Template Modal (Form) */}
-      {isAddingTemplate && (
-        <form onSubmit={handleAddTemplate} className="bg-white p-6 rounded-3xl border border-blue-50 shadow-xl space-y-5 animate-in slide-in-from-top-4 relative overflow-hidden max-w-md mx-auto w-full">
+      {/* Bill Modal (Form) */}
+      {isAddingBill && (
+        <form onSubmit={handleAddBill} className="bg-white p-6 rounded-3xl border border-blue-50 shadow-xl space-y-5 animate-in slide-in-from-top-4 relative overflow-hidden max-w-md mx-auto w-full">
           <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500"></div>
           <h3 className="font-bold text-slate-700 flex items-center gap-2 text-lg">
             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            Nova Conta Mensal
+            Nova Conta a Pagar
           </h3>
 
           <div>
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nome da Conta</label>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Descrição</label>
             <input
               required
               className="w-full p-3 mt-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium text-slate-700 placeholder-slate-300"
-              value={newTemplate.nome}
-              onChange={e => setNewTemplate({ ...newTemplate, nome: e.target.value })}
+              value={newBill.description}
+              onChange={e => setNewBill({ ...newBill, description: e.target.value })}
               placeholder="Ex: Aluguel, Internet..."
             />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-400 uppercase mb-3 block tracking-wider">O valor muda todo mês?</label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setNewTemplate({ ...newTemplate, tipo: 'Fixa' })}
-                className={`p-3 rounded-xl border-2 text-left transition-all relative overflow-hidden ${newTemplate.tipo === 'Fixa' ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
-              >
-                <span className={`block text-xs font-bold mb-0.5 ${newTemplate.tipo === 'Fixa' ? 'text-blue-600' : 'text-slate-400'}`}>Valor Fixo</span>
-                <span className="block text-sm font-bold text-slate-700">Não muda</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setNewTemplate({ ...newTemplate, tipo: 'Variavel' })}
-                className={`p-3 rounded-xl border-2 text-left transition-all relative overflow-hidden ${newTemplate.tipo === 'Variavel' ? 'border-blue-500 bg-blue-50/50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
-              >
-                <span className={`block text-xs font-bold mb-0.5 ${newTemplate.tipo === 'Variavel' ? 'text-blue-600' : 'text-slate-400'}`}>Valor Variável</span>
-                <span className="block text-sm font-bold text-slate-700">Muda todo mês</span>
-              </button>
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -257,25 +290,24 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
                 min="1" max="31"
                 required
                 className="w-full p-3 mt-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-colors font-bold text-slate-700 text-center"
-                value={newTemplate.dia_vencimento}
-                onChange={e => setNewTemplate({ ...newTemplate, dia_vencimento: parseInt(e.target.value) })}
+                value={newBill.dueDateDay}
+                onChange={e => setNewBill({ ...newBill, dueDateDay: parseInt(e.target.value) })}
               />
             </div>
             <div className="col-span-1">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Valor Padrão</label>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Valor Estimado</label>
               <input
                 type="number"
-                disabled={newTemplate.tipo === 'Variavel'}
-                className={`w-full p-3 mt-2 border rounded-xl outline-none transition-colors font-bold text-center ${newTemplate.tipo === 'Variavel' ? 'bg-slate-50 text-slate-300 border-slate-100' : 'bg-white text-slate-700 border-slate-200 focus:border-blue-500'}`}
-                value={newTemplate.valor_padrao}
-                onChange={e => setNewTemplate({ ...newTemplate, valor_padrao: parseFloat(e.target.value) })}
+                className={`w-full p-3 mt-2 border rounded-xl outline-none transition-colors font-bold text-center bg-white text-slate-700 border-slate-200 focus:border-blue-500`}
+                value={newBill.amount}
+                onChange={e => setNewBill({ ...newBill, amount: e.target.value })}
                 placeholder="0.00"
               />
             </div>
           </div>
 
           <div className="flex gap-3 pt-4">
-            <button type="button" onClick={() => setIsAddingTemplate(false)} className="flex-1 py-3.5 text-slate-500 font-bold text-sm hover:bg-slate-50 rounded-xl transition-colors">Cancelar</button>
+            <button type="button" onClick={() => setIsAddingBill(false)} className="flex-1 py-3.5 text-slate-500 font-bold text-sm hover:bg-slate-50 rounded-xl transition-colors">Cancelar</button>
             <button type="submit" className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl font-bold shadow-xl shadow-slate-200 hover:bg-slate-800 active:scale-95 transition-all">Salvar Conta</button>
           </div>
         </form>
@@ -284,7 +316,7 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
       {/* 3. Cards de Contas (Redesign) */}
       {activeTab === 'pagar' && (
         <div className="space-y-4">
-          {aPagar.length === 0 ? (
+          {pending.length === 0 ? (
             <div className="text-center py-10 opacity-50 flex flex-col items-center">
               <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
@@ -293,16 +325,16 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
             </div>
           ) : (
             <div className="space-y-3">
-              {aPagar.sort((a, b) => a.data_vencimento.localeCompare(b.data_vencimento)).map(c => {
+              {pending.sort((a, b) => a.date.localeCompare(b.date)).map(c => {
                 const hoje = new Date().toISOString().split('T')[0];
-                const vencida = c.data_vencimento < hoje;
-                const isHoje = c.data_vencimento === hoje;
+                const vencida = c.date < hoje;
+                const isHoje = c.date === hoje;
 
                 // Semantic Logic
                 let accentBorder = "border-slate-300"; // Default Future
                 let statusColor = "text-slate-500";
 
-                if (c.necessita_valor) {
+                if (c.amount === 0) {
                   accentBorder = "border-amber-400";
                   statusColor = "text-amber-600";
                 } else if (vencida) {
@@ -328,7 +360,7 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
                     {/* Left: Info */}
                     <div>
                       <h4 className={`font-bold text-base transition-colors ${isAnimating ? 'text-green-700' : 'text-slate-800'}`}>
-                        {isAnimating ? 'PAGO COM SUCESSO!' : c.nome}
+                        {isAnimating ? 'PAGO COM SUCESSO!' : c.description}
                       </h4>
                       <p className={`text-xs font-bold mt-1 uppercase tracking-wide flex items-center gap-1.5 ${isAnimating ? 'hidden' : statusColor}`}>
                         {!isAnimating && vencida && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
@@ -336,61 +368,33 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
 
                         {!isAnimating && (
                           isHoje ? 'Vence Hoje!' :
-                            vencida ? `Venceu dia ${new Date(c.data_vencimento).getUTCDate()}/${new Date(c.data_vencimento).getUTCMonth() + 1}` :
-                              `Vence dia ${new Date(c.data_vencimento).getUTCDate()}/${new Date(c.data_vencimento).getUTCMonth() + 1}`
+                            vencida ? `Venceu dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}` :
+                              `Vence dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}`
                         )}
                       </p>
                     </div>
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-4">
+                      <>
+                        {!isAnimating && (
+                          <span className={`font-black text-base ${vencida ? 'text-red-600' : 'text-slate-700'}`}>
+                            R$ {c.amount.toFixed(2)}
+                          </span>
+                        )}
 
-                      {/* Case 1: Needs Value */}
-                      {c.necessita_valor ? (
-                        editingValueId === c.id ? (
-                          <div className="flex items-center gap-2 animate-in slide-in-from-right">
-                            <input
-                              autoFocus
-                              type="number"
-                              className="w-24 p-2 bg-white border-2 border-amber-200 rounded-lg text-lg outline-none font-bold text-slate-800 text-center shadow-sm focus:border-amber-400"
-                              placeholder="R$?"
-                              value={tempValue}
-                              onChange={e => setTempValue(e.target.value)}
-                            />
-                            <button onClick={() => handleUpdateValor(c.id)} className="bg-amber-500 text-white w-10 h-10 rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-transform">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setEditingValueId(c.id)}
-                            className="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg text-sm font-bold border border-amber-200 shadow-sm hover:bg-amber-100 hover:shadow-md transition-all active:scale-95"
-                          >
-                            Definir Valor
-                          </button>
-                        )
-                      ) : (
-                        // Case 2: Ready to Pay
-                        <>
-                          {!isAnimating && (
-                            <span className={`font-black text-base ${vencida ? 'text-red-600' : 'text-slate-700'}`}>
-                              R$ {c.valor.toFixed(2)}
-                            </span>
-                          )}
-
-                          <button
-                            onClick={() => togglePago(c.id)}
-                            disabled={isAnimating}
-                            className={`rounded-full flex items-center justify-center text-white shadow-md transition-all duration-500 ease-out
+                        <button
+                          onClick={() => togglePago(c)}
+                          disabled={isAnimating}
+                          className={`rounded-full flex items-center justify-center text-white shadow-md transition-all duration-500 ease-out
                               ${isAnimating
-                                ? 'w-12 h-12 bg-green-500 rotate-[360deg] scale-125'
-                                : `w-10 h-10 active:scale-90 hover:scale-105 bg-emerald-500 shadow-emerald-200`
-                              }`}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width={isAnimating ? 24 : 20} height={isAnimating ? 24 : 20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                          </button>
-                        </>
-                      )}
+                              ? 'w-12 h-12 bg-green-500 rotate-[360deg] scale-125'
+                              : `w-10 h-10 active:scale-90 hover:scale-105 bg-emerald-500 shadow-emerald-200`
+                            }`}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width={isAnimating ? 24 : 20} height={isAnimating ? 24 : 20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                        </button>
+                      </>
                     </div>
                   </div>
                 );
@@ -403,34 +407,34 @@ const Contas: React.FC<ContasProps> = ({ contas, onUpdate }) => {
       {/* 4. Lista Histórico (Clean) */}
       {activeTab === 'historico' && (
         <div className="space-y-4">
-          {historico.length === 0 ? (
+          {completed.length === 0 ? (
             <div className="text-center py-10 opacity-50">
               <p className="text-sm font-bold text-slate-400">Nenhum histórico.</p>
             </div>
           ) : (
             <div className="space-y-2">
-              {historico.map(c => {
-                const isDespesa = c.tipo === 'Despesa';
+              {completed.map(c => {
+                const isExpense = c.type === 'expense';
                 return (
                   <div key={c.id} className="bg-white p-4 rounded-xl border border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isDespesa ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'}`}>
-                        {isDespesa ? (
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isExpense ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'}`}>
+                        {isExpense ? (
                           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>
                         ) : (
                           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                         )}
                       </div>
                       <div>
-                        <h4 className="font-bold text-slate-700 text-sm">{c.nome}</h4>
+                        <h4 className="font-bold text-slate-700 text-sm">{c.description}</h4>
                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">
-                          {new Date(c.data_pagamento || c.data_vencimento).toLocaleDateString('pt-BR')}
+                          {new Date(c.date).toLocaleDateString('pt-BR')}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <span className="font-bold text-slate-700 text-sm opacity-90 block">R$ {c.valor.toFixed(2)}</span>
+                      <span className="font-bold text-slate-700 text-sm opacity-90 block">R$ {c.amount.toFixed(2)}</span>
 
                       <button
                         onClick={() => handleDelete(c.id)}

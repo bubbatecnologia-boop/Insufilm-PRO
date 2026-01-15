@@ -1,14 +1,6 @@
 import { supabase } from './supabase';
 import { Product, Appointment, Transaction, Client, Organization, Profile } from '../types';
 
-// Helper to get Organization ID (though RLS handles security, we often need it for inserts)
-// For RLS to work on inserts, the user must be logged in. 
-// We will rely on RLS policies: "auth.uid() -> profile -> org_id"
-// BUT for INSERTs, we need to manually pass organization_id if the policy expects it, 
-// OR we can trigger it. 
-// The safest SaaS pattern: Front-end fetches the org_id once and sends it.
-// OR simpler: Function wrapper.
-
 export const db = {
   // --- PRODUCTS ---
   getProducts: async (): Promise<Product[]> => {
@@ -25,12 +17,6 @@ export const db = {
   },
 
   addProduct: async (product: Omit<Product, 'id' | 'created_at'>): Promise<Product | null> => {
-    // We need to fetch the org_id first or trust the RLS default?
-    // Let's assume the UI passes the org_id OR we fetch it here.
-    // Optimization: Store org_id in Context/Session.
-    // For now, let's strictly rely on what is passed or fetch if missing.
-    // Actually, RLS blocks if org_id is wrong.
-
     const { data, error } = await supabase
       .from('products')
       .insert(product)
@@ -62,17 +48,134 @@ export const db = {
     if (error) console.error('Error deleting product:', error);
   },
 
-  // --- OTHERS (Placeholders for now to allow compiling) ---
+  // --- CLIENTS ---
+  createClient: async (client: Omit<Client, 'id' | 'created_at'>): Promise<Client | null> => {
+    const { data, error } = await supabase
+      .from('clients')
+      .insert(client)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating client:', error);
+      return null;
+    }
+    return data as Client;
+  },
+
+  // --- APPOINTMENTS ---
+  getAppointments: async (date: string): Promise<Appointment[]> => {
+    // date is YYYY-MM-DD
+    // Filter from T00:00:00 to T23:59:59 in local time approach (simple string comparison for now)
+    // Or we can use Supabase filter logic more robustly
+    const start = `${date}T00:00:00`;
+    const end = `${date}T23:59:59`;
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        *,
+        client:clients(*)
+      `)
+      .gte('start_time', start)
+      .lte('start_time', end)
+      .order('start_time');
+
+    if (error) {
+      console.error('Error fetching appointments:', error);
+      return [];
+    }
+    return data as Appointment[];
+  },
+
+  addAppointment: async (appointment: Omit<Appointment, 'id' | 'created_at'>): Promise<Appointment | null> => {
+    const { data, error } = await supabase
+      .from('appointments')
+      .insert(appointment)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding appointment:', error);
+      return null;
+    }
+    return data as Appointment;
+  },
+
+  updateAppointmentStatus: async (id: string, status: Appointment['status']): Promise<void> => {
+    const { error } = await supabase
+      .from('appointments')
+      .update({ status })
+      .eq('id', id);
+    if (error) console.error('Error updating appointment status:', error);
+  },
+
+  deleteAppointment: async (id: string): Promise<void> => {
+    const { error } = await supabase
+      .from('appointments')
+      .delete()
+      .eq('id', id);
+    if (error) console.error('Error deleting appointment:', error);
+  },
+
+  // --- TRANSACTIONS (Finance) ---
+  getTransactions: async (month?: string): Promise<Transaction[]> => {
+    let query = supabase
+      .from('transactions')
+      .select('*')
+      .order('date', { ascending: false });
+
+    if (month) {
+      // e.g. 2023-10
+      const start = `${month}-01`;
+      // easy hack for end of month: look for less than next month
+      // or just simple string match if date column is date only.
+      // Assuming date is 'YYYY-MM-DD'
+      query = query.gte('date', start).lte('date', `${month}-31`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching transactions:', error);
+      return [];
+    }
+    return data as Transaction[];
+  },
+
+  addTransaction: async (transaction: Omit<Transaction, 'id' | 'created_at'>): Promise<Transaction | null> => {
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert(transaction)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding transaction:', error);
+      return null;
+    }
+    return data as Transaction;
+  },
+
+  updateTransaction: async (id: string, updates: Partial<Transaction>): Promise<void> => {
+    const { error } = await supabase.from('transactions').update(updates).eq('id', id);
+    if (error) console.error('Error updating transaction', error);
+  },
+
+  deleteTransaction: async (id: string): Promise<void> => {
+    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    if (error) console.error('Error deleting transaction', error);
+  },
+
+  // --- LEGACY/PLACEHOLDERS Helpers to keep other files from crashing before refactor ---
   getTemplates: async () => [],
   getContas: async () => [],
-  getAgendamentos: async () => [],
+  getAgendamentos: async () => [], // Use getAppointments now
   getVendasHoje: async () => [],
   registrarVenda: async () => { },
   addContaTemplate: async () => { },
   toggleContaPaga: async () => { },
   deleteConta: async () => { },
   updateValorConta: async () => { },
-  addAgendamento: async () => { },
-  removeAgendamento: async () => { },
-  updateAgendamentoStatus: async () => { }
+  addAgendamento: async () => { }, // Use addAppointment
+  removeAgendamento: async () => { }, // Use deleteAppointment
 };

@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/database';
-import { Agendamento } from '../types';
+import { supabase } from '../lib/supabase';
+import { Appointment, Product } from '../types';
 
 interface AgendaProps {
     onUpdate: () => void;
@@ -14,17 +15,27 @@ const HOURS = [
 
 const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [produtos] = useState(db.getProdutos()); // Fetch products for the dropdown
-    const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
+    const [products, setProducts] = useState<Product[]>([]);
+    const [appointments, setAppointments] = useState<Appointment[]>([]);
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        loadAgendamentos();
+        loadData();
     }, [selectedDate]);
 
-    const loadAgendamentos = () => {
+    const loadData = async () => {
+        setLoading(true);
+        // Load Appointments
         const isoDate = selectedDate.toISOString().split('T')[0];
-        const data = db.getAgendamentos(isoDate);
-        setAgendamentos(data);
+        const apps = await db.getAppointments(isoDate);
+        setAppointments(apps);
+
+        // Load Products for dropdown (only once ideally, but ok here)
+        if (products.length === 0) {
+            const prods = await db.getProducts();
+            setProducts(prods);
+        }
+        setLoading(false);
     };
 
     const handlePrevDay = () => {
@@ -46,15 +57,15 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
             date.getFullYear() === today.getFullYear();
 
         if (isToday) return `Hoje, ${date.getDate()} ${date.toLocaleString('default', { month: 'short' }).replace('.', '')}`;
-
         return `${date.toLocaleDateString('pt-BR', { weekday: 'short' })}, ${date.getDate()} ${date.toLocaleString('default', { month: 'short' }).replace('.', '')}`;
     };
 
-    const getStatusColor = (status: Agendamento['status']) => {
+    const getStatusColor = (status: Appointment['status']) => {
         switch (status) {
-            case 'Pendente': return 'bg-slate-100 text-slate-500 border-slate-200';
-            case 'Executando': return 'bg-blue-50 text-blue-600 border-blue-200';
-            case 'Concluido': return 'bg-green-50 text-green-600 border-green-200';
+            case 'pending': return 'bg-slate-100 text-slate-500 border-slate-200';
+            case 'confirmed': return 'bg-blue-50 text-blue-600 border-blue-200';
+            case 'completed': return 'bg-green-50 text-green-600 border-green-200';
+            case 'canceled': return 'bg-red-50 text-red-600 border-red-200';
             default: return 'bg-slate-50';
         }
     };
@@ -88,23 +99,90 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
         });
     };
 
-    const handleSave = () => {
-        if (!newAppointment.cliente || !newAppointment.veiculo) return;
+    const handleSave = async () => {
+        if (!newAppointment.cliente) return;
 
-        db.addAgendamento({
-            data: selectedDate.toISOString().split('T')[0],
-            horario: selectedTimeSlot,
-            cliente: newAppointment.cliente,
-            veiculo: newAppointment.veiculo,
-            servico: newAppointment.servico,
-            contato: newAppointment.whatsapp,
-            valor: newAppointment.valor ? parseFloat(newAppointment.valor) : undefined,
-            produto_id: newAppointment.usarEstoque ? newAppointment.produtoId : undefined,
-            status: 'Pendente'
-        });
+        try {
+            // 1. Get Org ID
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single();
+            if (!profile) return;
 
-        onUpdate();
-        setIsModalOpen(false);
+            const orgId = profile.organization_id;
+
+            // 2. Create Client (Simplified: Always new for MVP, or we would search first)
+            // Ideally we'd search for existing client by phone first.
+            const newClient = await db.createClient({
+                organization_id: orgId,
+                name: newAppointment.cliente,
+                phone: newAppointment.whatsapp,
+                car_model: newAppointment.veiculo,
+                notes: `Placa: ${newAppointment.placa}`
+            });
+
+            if (!newClient) throw new Error("Falha ao criar cliente");
+
+            // 3. Create Appointment
+            const dateStr = selectedDate.toISOString().split('T')[0]; // YYYY-MM-DD
+            const startTime = `${dateStr}T${selectedTimeSlot}:00`;
+            // Default 1 hour duration
+            const [hh, mm] = selectedTimeSlot.split(':').map(Number);
+            const endDate = new Date(selectedDate);
+            endDate.setHours(hh + 1, mm, 0);
+            // Need ISO string for end time respecting the date
+            // Simpler: just string manipulation if simple hour math
+            const endTimeStr = `${dateStr}T${(hh + 1).toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}:00`;
+
+            // Fix timezone offset issues? We are sending simple ISO. Supabase Timestamptz stores as UTC.
+            // If we send `2023-01-01T08:00:00`, postgres treats it as local if no offset, or we should assume?
+            // Safer to send with App's timezone or simple string if DB is set.
+            // Let's send standard ISO for now.
+
+            await db.addAppointment({
+                organization_id: orgId,
+                client_id: newClient.id,
+                title: `${newAppointment.servico} - ${newAppointment.veiculo.toUpperCase()}`,
+                start_time: new Date(startTime).toISOString(),
+                end_time: new Date(endTimeStr).toISOString(),
+                status: 'pending',
+                price_total: newAppointment.valor ? parseFloat(newAppointment.valor) : 0
+            });
+
+            // 4. Stock Decrement (Optional MVP feature)
+            if (newAppointment.usarEstoque && newAppointment.produtoId) {
+                const prod = products.find(p => p.id === newAppointment.produtoId);
+                if (prod) {
+                    await db.updateProduct(prod.id, {
+                        stock_quantity: prod.stock_quantity - 1 // Simple decrement 1 unit
+                    });
+                }
+            }
+
+            onUpdate();
+            setIsModalOpen(false);
+            loadData();
+
+        } catch (err) {
+            console.error(err);
+            alert("Erro ao salvar agendamento.");
+        }
+    };
+
+    const handleStatusChange = async (appointment: Appointment) => {
+        const nextStatus =
+            appointment.status === 'pending' ? 'confirmed' :
+                appointment.status === 'confirmed' ? 'completed' : 'pending';
+
+        await db.updateAppointmentStatus(appointment.id, nextStatus as any);
+        loadData();
+    };
+
+    const handleDelete = async (id: string) => {
+        if (window.confirm("Deseja cancelar este agendamento?")) {
+            await db.deleteAppointment(id);
+            loadData();
+        }
     };
 
     return (
@@ -117,7 +195,9 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
 
                 <div className="text-center">
                     <h2 className="text-lg font-bold text-slate-800 capitalize">{formatDate(selectedDate)}</h2>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{agendamentos.length} Agendamentos</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                        {loading ? 'Carregando...' : `${appointments.length} Agendamentos`}
+                    </p>
                 </div>
 
                 <button onClick={handleNextDay} className="p-2 rounded-full hover:bg-slate-50 text-slate-400 hover:text-slate-600 transition-colors">
@@ -128,7 +208,15 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
             {/* 2. Timeline */}
             <div className="flex-1 space-y-4">
                 {HOURS.map(hour => {
-                    const appointment = agendamentos.find(a => a.horario.startsWith(hour.split(':')[0])); // Simple check HH
+                    // Match appointments by hour (UTC conversion might be tricky, checking local substring for MVP)
+                    // The Supabase Date is ISO. We need to match local hour.
+                    // Simple check: Convert appt start_time to local HH:00 string
+
+                    const appointment = appointments.find(a => {
+                        const d = new Date(a.start_time);
+                        const h = d.getHours().toString().padStart(2, '0');
+                        return `${h}:00` === hour;
+                    });
 
                     return (
                         <div key={hour} className="flex gap-4 group">
@@ -143,97 +231,33 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
                                     // Appointment Card
                                     <div className={`p-4 rounded-2xl border-l-[6px] shadow-sm transition-all hover:shadow-md ${getStatusColor(appointment.status).replace('bg-', 'border-').split(' ')[2]} bg-white border-slate-100 relative overflow-hidden`}>
 
-                                        {/* Paid Badge Overlay */}
-                                        {appointment.pago && (
-                                            <div className="absolute top-0 right-0 bg-emerald-100 text-emerald-800 text-[9px] font-black px-2 py-1 rounded-bl-xl border-b border-l border-emerald-200 shadow-sm z-10 flex items-center gap-1">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
-                                                PAGO
-                                            </div>
-                                        )}
-
                                         <div className="flex justify-between items-start mb-2 mt-2">
                                             {/* Status Badge - Interactive */}
                                             <button
-                                                onClick={() => {
-                                                    // If already paid or just moving between Pendente/Executando, standard update
-                                                    // If moving to Concluido and NOT paid, trigger Checkout
-                                                    if (appointment.status === 'Executando' && !appointment.pago) {
-                                                        // Trigger Checkout (Todo: Implement specific checkout modal, for now just confirm)
-                                                        if (window.confirm("Finalizar e Cobrar Serviço?")) {
-                                                            // Register Sale & Finish
-                                                            // Here we would ideally open a payment modal. For simplicity/MVP:
-                                                            const venda = {
-                                                                produto_id: appointment.produto_id || 'servico_avulso',
-                                                                produto_nome: appointment.servico,
-                                                                quantidade: 1,
-                                                                valor_total: appointment.valor || 0,
-                                                                forma_pagamento: 'Pix' as any // Default or ask
-                                                            };
-
-                                                            db.registrarVenda(venda, false); // Don't deduct stock again if reserved? Wait, if we reserved stock at creation (addAgendamento reserved it), we SHOULD NOT deduct again.
-                                                            // Logic: addAgendamento deducted stock. removeAgendamento returns it.
-                                                            // registrarVenda also deducts stock.
-                                                            // We need to tell registrarVenda NOT to deduct stock if appointment has `produto_id`.
-
-                                                            db.updateAgendamentoStatus(appointment.id, 'Concluido');
-                                                            // Mark as paid ? db.markAsPaid(appointment.id) - we'd need this function
-                                                            onUpdate();
-                                                            loadAgendamentos();
-                                                        }
-                                                    } else {
-                                                        const nextStatus =
-                                                            appointment.status === 'Pendente' ? 'Executando' :
-                                                                appointment.status === 'Executando' ? 'Concluido' : 'Pendente';
-
-                                                        db.updateAgendamentoStatus(appointment.id, nextStatus);
-                                                        onUpdate();
-                                                        loadAgendamentos();
-                                                    }
-                                                }}
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${appointment.status === 'Pendente'
-                                                        ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                                                        : appointment.status === 'Executando'
-                                                            ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                                onClick={() => handleStatusChange(appointment)}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all active:scale-95 ${appointment.status === 'pending' ? 'bg-slate-100 text-slate-500' :
+                                                        appointment.status === 'confirmed' ? 'bg-blue-100 text-blue-700' :
+                                                            'bg-green-100 text-green-700'
                                                     }`}
                                             >
-                                                {appointment.status === 'Pendente' && (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-                                                )}
-                                                {appointment.status === 'Executando' && (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4" /><path d="m16.2 7.8 2.9-2.9" /><path d="M18 12h4" /><path d="m16.2 16.2 2.9 2.9" /><path d="M12 18v4" /><path d="m4.9 19.1 2.9-2.9" /><path d="M2 12h4" /><path d="m4.9 4.9 2.9 2.9" /></svg>
-                                                )}
-                                                {appointment.status === 'Concluido' && (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                                                )}
-                                                {appointment.status}
+                                                {appointment.status === 'pending' && 'Pendente'}
+                                                {appointment.status === 'confirmed' && 'Confirmado'}
+                                                {appointment.status === 'completed' && 'Concluido'}
                                             </button>
 
                                             <button
-                                                onClick={() => {
-                                                    if (window.confirm("Deseja cancelar este agendamento?")) {
-                                                        db.removeAgendamento(appointment.id);
-                                                        onUpdate();
-                                                        loadAgendamentos();
-                                                    }
-                                                }}
+                                                onClick={() => handleDelete(appointment.id)}
                                                 className="text-slate-300 hover:text-red-500 transition-colors"
                                             >
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                             </button>
                                         </div>
 
-                                        <h3 className="text-base font-bold text-slate-900">{appointment.veiculo}</h3>
+                                        <h3 className="text-base font-bold text-slate-900">{appointment.title}</h3>
                                         <div className="flex justify-between items-center">
-                                            <p className="text-sm text-slate-600 mb-0">{appointment.servico}</p>
-                                            {appointment.valor && <span className="text-xs font-bold text-slate-500">R$ {parseFloat(appointment.valor.toString()).toFixed(2)}</span>}
-                                        </div>
-
-                                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-50">
-                                            <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500">
-                                                {appointment.cliente.charAt(0)}
-                                            </div>
-                                            <span className="text-xs font-bold text-slate-500">{appointment.cliente}</span>
+                                            {/* We can show client name if joined */}
+                                            <p className="text-sm text-slate-600 mb-0">{appointment.client?.name || 'Cliente'}</p>
+                                            {appointment.price_total > 0 && <span className="text-xs font-bold text-slate-500">R$ {appointment.price_total.toFixed(2)}</span>}
                                         </div>
                                     </div>
                                 ) : (
@@ -346,7 +370,7 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
                                 </div>
                             </div>
 
-                            {/* Supreme Functionality: Stock Reserve */}
+                            {/* Stock Reserve */}
                             <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 relative overflow-hidden">
                                 <div className="flex items-center justify-between mb-2 z-10 relative">
                                     <label className="text-sm font-bold text-blue-800 flex items-center gap-2">
@@ -370,8 +394,8 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
                                             onChange={e => setNewAppointment({ ...newAppointment, produtoId: e.target.value })}
                                         >
                                             <option value="">Selecione o produto...</option>
-                                            {produtos.map(p => (
-                                                <option key={p.id} value={p.id}>{p.nome} ({p.quantidade_atual} {p.unidade})</option>
+                                            {products.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name} ({p.stock_quantity} {p.type === 'material_metro' ? 'mt' : 'un'})</option>
                                             ))}
                                         </select>
                                         <p className="text-[10px] text-blue-600 mt-1 font-medium ml-1">
