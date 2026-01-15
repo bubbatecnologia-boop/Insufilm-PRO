@@ -14,19 +14,53 @@ const App: React.FC = () => {
   const [needsUpdate, setNeedsUpdate] = useState(0);
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [orgName, setOrgName] = useState('Insufilm Pro'); // Default fallback
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const initData = async () => {
+      // 1. Check active session
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
+
+      if (session) {
+        // 2. Fetch Organization Name logic
+        try {
+          // Get profile first to find org_id
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('organization_id')
+            .eq('id', session.user.id)
+            .single();
+
+          if (profile?.organization_id) {
+            // Get Org Name
+            const { data: org } = await supabase
+              .from('organizations')
+              .select('name')
+              .eq('id', profile.organization_id)
+              .single();
+
+            if (org?.name) {
+              setOrgName(org.name);
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching org name:", error);
+        }
+      }
       setLoading(false);
-    });
+    };
+
+    initData();
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      // If user logs out, reset org name or if logs in, it will re-fetch on reload/effect
+      if (!session) setOrgName('Insufilm Pro');
     });
 
     return () => subscription.unsubscribe();
@@ -34,6 +68,12 @@ const App: React.FC = () => {
 
   const handleUpdate = () => {
     setNeedsUpdate(prev => prev + 1);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsUserMenuOpen(false);
+    setOrgName('Insufilm Pro');
   };
 
   const renderView = () => {
@@ -46,7 +86,7 @@ const App: React.FC = () => {
       case 'estoque':
         return <Estoque key={needsUpdate} produtos={[]} onUpdate={handleUpdate} />; // Fixed for compiling
       case 'contas':
-        return <Contas key={needsUpdate} contas={[]} templates={[]} onUpdate={handleUpdate} />; // Fixed for compiling
+        return <Contas key={needsUpdate} onUpdate={handleUpdate} />; // Fixed for compiling
       case 'ia':
         return <AssistenteIA />;
       default:
@@ -59,7 +99,7 @@ const App: React.FC = () => {
   }
 
   if (!session) {
-    return <Auth onLogin={() => { }} />; // Session update handles the flow now
+    return <Auth onLogin={() => { }} />;
   }
 
   return (
@@ -67,12 +107,38 @@ const App: React.FC = () => {
 
       {/* Top Bar for Mobile */}
       <div className="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md z-40 px-6 py-4 border-b border-slate-100 flex justify-between items-center safe-top">
-        <h1 className="text-xl font-bold tracking-tight text-slate-900">
-          Insufilm <span className="text-blue-600">Pro</span>
+        <h1 className="text-xl font-bold tracking-tight text-slate-900 truncate max-w-[70%]">
+          {orgName}
         </h1>
-        <button className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-        </button>
+
+        <div className="relative">
+          <button
+            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+            className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+          </button>
+
+          {/* Dropdown Menu */}
+          {isUserMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)}></div>
+              <div className="absolute right-0 top-12 w-48 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-50 animate-in fade-in slide-in-from-top-2">
+                <div className="px-3 py-2 border-b border-slate-50 mb-1">
+                  <p className="text-xs text-slate-400 font-medium">Logado como</p>
+                  <p className="text-sm font-bold text-slate-800 truncate">{session.user.email}</p>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></svg>
+                  Sair da Conta
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Main Content Area */}
