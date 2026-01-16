@@ -19,50 +19,48 @@ const App: React.FC = () => {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [orgName, setOrgName] = useState('Insufilm Pro'); // Default fallback
 
-  useEffect(() => {
-    const initData = async () => {
-      // 1. Check active session
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
+  const fetchOrgData = async (uid: string) => {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('organization_id')
+        .eq('id', uid)
+        .single();
 
-      if (session) {
-        // 2. Fetch Organization Name logic
-        try {
-          // Get profile first to find org_id
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('organization_id')
-            .eq('id', session.user.id)
-            .single();
+      if (profile?.organization_id) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('name')
+          .eq('id', profile.organization_id)
+          .single();
 
-          if (profile?.organization_id) {
-            // Get Org Name
-            const { data: org } = await supabase
-              .from('organizations')
-              .select('name')
-              .eq('id', profile.organization_id)
-              .single();
-
-            if (org?.name) {
-              setOrgName(org.name);
-            }
-          }
-        } catch (error) {
-          console.error("Error fetching org name:", error);
+        if (org?.name) {
+          setOrgName(org.name);
         }
       }
+    } catch (error) {
+      console.error("Error fetching org name:", error);
+    }
+  };
+
+  useEffect(() => {
+    // Initial Session Check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchOrgData(session.user.id);
       setLoading(false);
-    };
+    });
 
-    initData();
-
-    // Listen for auth changes
+    // Auth Change Listener
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      // If user logs out, reset org name or if logs in, it will re-fetch on reload/effect
-      if (!session) setOrgName('Insufilm Pro');
+      if (session) {
+        fetchOrgData(session.user.id);
+      } else {
+        setOrgName('Insufilm Pro');
+      }
     });
 
     return () => subscription.unsubscribe();

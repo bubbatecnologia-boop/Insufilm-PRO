@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../lib/database';
 import { supabase } from '../lib/supabase';
 import { Appointment, Product } from '../types';
@@ -307,9 +308,9 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
                 </div>
 
                 {/* 3. New Appointment Modal */}
-                {isModalOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                {isModalOpen && createPortal(
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-end sm:items-center justify-center p-4 animate-in fade-in">
+                        <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in slide-in-from-bottom-10 space-y-0">
 
                             {/* Header */}
                             <div className="bg-slate-50 border-b border-slate-100 p-6 flex justify-between items-center">
@@ -323,7 +324,7 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
                             </div>
 
                             {/* Body */}
-                            <div className="p-6 space-y-5">
+                            <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
 
                                 {/* Line 1: Client */}
                                 <div className="grid grid-cols-2 gap-4">
@@ -449,11 +450,12 @@ const Agenda: React.FC<AgendaProps> = ({ onUpdate }) => {
                                     onClick={handleSave}
                                     className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-all hover:bg-blue-700"
                                 >
-                                    Confirmar Agendamento
+                                    Confirmar
                                 </button>
                             </div>
                         </div>
-                    </div>
+                    </div>,
+                    document.body
                 )}
                 {/* 4. Delete Confirmation Modal */}
                 {deleteModalOpen && (
