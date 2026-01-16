@@ -22,6 +22,14 @@ const Home: React.FC<HomeProps> = ({ onNavigate, onUpdate }) => {
     loadData();
   }, []);
 
+  const getLocalDate = () => {
+    const date = new Date();
+    // Adjust for timezone offset to get correct YYYY-MM-DD for local time
+    const offset = date.getTimezoneOffset();
+    const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().split('T')[0];
+  };
+
   const loadData = async () => {
     setLoading(true);
     // Load Transactions for current month
@@ -39,53 +47,61 @@ const Home: React.FC<HomeProps> = ({ onNavigate, onUpdate }) => {
   };
 
   const salesToday = transactions.filter(t => {
-    // Assuming 'income' is a sale. 
-    // Filter by today's date
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Filter by today's date (Local Time)
+    const todayStr = getLocalDate();
     return t.type === 'income' && t.date === todayStr;
   });
 
   const pendingBills = transactions.filter(t => t.type === 'expense' && t.status === 'pending');
 
   const incomeToday = salesToday.reduce((acc, t) => acc + t.amount, 0);
-  // We can calculate profit if we store cost, but Transaction currently only has amount. 
-  // For now, let's just show Revenue. Or we can assume specific margin? 
-  // Let's just show Revenue for "Vendas Hoje" and maybe total stats for the month.
-
   const monthIncome = transactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
   const monthExpense = transactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+  const monthNet = monthIncome - monthExpense;
 
-  const handleSaleConfirm = async (produtoId: string, quantidade: number, formaPagamento: 'Dinheiro' | 'Pix' | 'Cartão') => {
-    const produto = products.find(p => p.id === produtoId);
-    if (!produto) return;
-
+  const handleSaleConfirm = async (
+    items: { product: Product; quantity: number; price: number }[],
+    totalValue: number,
+    paymentMethod: 'Dinheiro' | 'Pix' | 'Cartão'
+  ) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const { data: profile } = await supabase.from('profiles').select('organization_id').eq('id', user.id).single();
     if (!profile) return;
 
-    // 1. Create Transaction (Income)
+    const todayStr = getLocalDate();
+
+    // 1. Create Description from items
+    const description = items.map(i => `${i.product.name} (${i.quantity}x)`).join(', ');
+
+    // 2. Create Transaction (Income)
     await db.addTransaction({
       organization_id: profile.organization_id,
-      description: `Venda: ${produto.name} (${quantidade}x)`,
-      amount: produto.sale_price * quantidade,
+      description: `Venda: ${description}`,
+      amount: totalValue,
       type: 'income',
-      category: 'Vendas',
-      date: new Date().toISOString().split('T')[0],
-      status: 'completed'
+      date: todayStr,
+      status: 'paid'
     });
 
-    // 2. Decrement Stock
-    if (produto.stock_quantity >= quantidade) {
-      await db.updateProduct(produto.id, {
-        stock_quantity: produto.stock_quantity - quantidade
-      });
+    // 3. Decrement Stock for each item
+    for (const item of items) {
+      // Only update stock if it's a physical product trackable (though logic implies all are Products)
+      if (item.product.stock_quantity >= item.quantity) {
+        await db.updateProduct(item.product.id, {
+          stock_quantity: item.product.stock_quantity - item.quantity
+        });
+      }
     }
 
     setIsNewSaleOpen(false);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
-    loadData();
+
+    setTimeout(() => {
+      loadData();
+    }, 500);
+
     if (onUpdate) onUpdate();
   };
 
@@ -107,8 +123,8 @@ const Home: React.FC<HomeProps> = ({ onNavigate, onUpdate }) => {
             <span className="text-2xl font-bold text-slate-800 block">R$ {incomeToday.toFixed(2)}</span>
           </div>
           <div className="bg-emerald-50 rounded-2xl p-3 border border-emerald-100">
-            <p className="text-emerald-600 text-xs font-bold uppercase tracking-wider mb-1">Mês (Entradas)</p>
-            <span className="text-xl font-black text-emerald-700 block">R$ {monthIncome.toFixed(2)}</span>
+            <p className="text-emerald-600 text-xs font-bold uppercase tracking-wider mb-1">Mês (Líquido)</p>
+            <span className="text-xl font-black text-emerald-700 block">R$ {monthNet.toFixed(2)}</span>
           </div>
         </div>
 

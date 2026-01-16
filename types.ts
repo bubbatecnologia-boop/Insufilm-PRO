@@ -63,6 +63,7 @@ export interface Transaction {
   amount: number;
   type: TransactionType;
   status: TransactionStatus;
+  date: string; // YYYY-MM-DD
   due_date?: string; // YYYY-MM-DD
   payment_method?: string;
   created_at: string;
