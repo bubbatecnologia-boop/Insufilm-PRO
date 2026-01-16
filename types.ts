@@ -2,7 +2,7 @@
 export type ProductType = 'material_metro' | 'unidade';
 export type AppointmentStatus = 'pending' | 'confirmed' | 'completed' | 'canceled';
 export type TransactionType = 'income' | 'expense';
-export type TransactionStatus = 'paid' | 'pending';
+export type TransactionStatus = 'paid' | 'pending' | 'completed';
 export type UserRole = 'admin' | 'member';
 
 export interface Organization {
@@ -61,6 +61,7 @@ export interface Transaction {
   organization_id: string;
   description: string;
   amount: number;
+  cost_amount?: number;
   type: TransactionType;
   status: TransactionStatus;
   date: string; // YYYY-MM-DD

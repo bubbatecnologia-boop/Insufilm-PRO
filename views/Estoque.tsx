@@ -1,8 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { Product, ProductType } from '../types';
 import { db } from '../lib/database';
 import { supabase } from '../lib/supabase';
+import PageTransition from '../components/PageTransition';
 
 interface EstoqueProps {
   // onUpdate is less strict now, we handle re-fetching internally, 
@@ -137,204 +137,207 @@ const Estoque: React.FC<EstoqueProps> = ({ onUpdate }) => {
   }
 
   return (
-    <div className="space-y-6 pb-24">
-      {/* 1. Header with Search & Filters */}
-      <div className="space-y-4">
-        <h2 className="text-2xl font-bold text-slate-900">Estoque</h2>
+    <PageTransition>
+      <div className="space-y-5 pb-20 relative min-h-screen">
+        {/* Toast Notification */}
+        {/* 1. Header with Search & Filters */}
+        <div className="space-y-4">
+          <h2 className="text-2xl font-bold text-slate-900">Estoque</h2>
 
-        {/* Search Input */}
-        <div className="relative">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          {/* Search Input */}
+          <div className="relative">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+            </div>
+            <input
+              type="text"
+              placeholder="Buscar item..."
+              className="w-full pl-12 pr-4 py-3.5 bg-white rounded-2xl border border-slate-200 shadow-sm outline-none focus:border-blue-500 transition-colors font-medium text-slate-700"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
           </div>
-          <input
-            type="text"
-            placeholder="Buscar item..."
-            className="w-full pl-12 pr-4 py-3.5 bg-white rounded-2xl border border-slate-200 shadow-sm outline-none focus:border-blue-500 transition-colors font-medium text-slate-700"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-          />
-        </div>
 
-        {/* Filter Chips */}
-        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-          {['Todos', 'Películas', 'Acessórios'].map(filter => (
-            <button
-              key={filter}
-              onClick={() => setActiveFilter(filter)}
-              className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${activeFilter === filter
-                ? 'bg-slate-900 text-white shadow-md'
-                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                }`}
-            >
-              {filter}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 2. Low Stock Section */}
-      {lowStock.length > 0 && (
-        <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
-          <div className="flex justify-between items-center px-1">
-            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Reposição Necessária</h3>
-            <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-md">{lowStock.length}</span>
-          </div>
-          <div className="space-y-2">
-            {lowStock.map(p => (
-              <div key={p.id} className="bg-red-50 p-4 rounded-3xl border border-red-100 flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-red-900">{p.name}</h4>
-                  <p className="text-xs font-bold text-red-400 mt-0.5">RESTAM {p.stock_quantity} {p.type === 'material_metro' ? 'Metros' : 'Un'}</p>
-                </div>
-                <button
-                  onClick={() => handleEdit(p)}
-                  className="text-sm font-bold text-red-600 hover:text-red-700 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  Repor +
-                </button>
-              </div>
+          {/* Filter Chips */}
+          <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+            {['Todos', 'Películas', 'Acessórios'].map(filter => (
+              <button
+                key={filter}
+                onClick={() => setActiveFilter(filter)}
+                className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${activeFilter === filter
+                  ? 'bg-slate-900 text-white shadow-md'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+              >
+                {filter}
+              </button>
             ))}
           </div>
         </div>
-      )}
 
-      {/* 3. Main Product List */}
-      <div className="space-y-3">
-        {filteredProducts.length === 0 ? (
-          <div className="text-center py-12 opacity-50">
-            <p className="font-medium text-slate-400">Nenhum produto encontrado</p>
+        {/* 2. Low Stock Section */}
+        {lowStock.length > 0 && (
+          <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+            <div className="flex justify-between items-center px-1">
+              <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Reposição Necessária</h3>
+              <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-md">{lowStock.length}</span>
+            </div>
+            <div className="space-y-2">
+              {lowStock.map(p => (
+                <div key={p.id} className="bg-red-50 p-4 rounded-3xl border border-red-100 flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-red-900">{p.name}</h4>
+                    <p className="text-xs font-bold text-red-400 mt-0.5">RESTAM {p.stock_quantity} {p.type === 'material_metro' ? 'Metros' : 'Un'}</p>
+                  </div>
+                  <button
+                    onClick={() => handleEdit(p)}
+                    className="text-sm font-bold text-red-600 hover:text-red-700 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Repor +
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
-        ) : (
-          filteredProducts.map(p => (
-            <div key={p.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 active:scale-[0.99] transition-transform" onClick={() => handleEdit(p)}>
-
-              {/* Icon */}
-              <div className="w-14 h-14 bg-slate-50 rounded-2xl flex-shrink-0 flex items-center justify-center text-slate-400 border border-slate-100">
-                {p.type === 'material_metro' ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" /><path d="m14.5 12.5 2-2" /><path d="m11.5 9.5 2-2" /><path d="m8.5 6.5 2-2" /><path d="m17.5 15.5 2-2" /></svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" /></svg>
-                )}
-              </div>
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <h3 className="font-bold text-slate-800 text-base truncate">{p.name}</h3>
-                <p className="text-xs text-slate-500 font-medium">R$ {p.sale_price.toFixed(2)}</p>
-              </div>
-
-              {/* Quantity */}
-              <div className="text-right flex flex-col items-end">
-                <span className="text-2xl font-bold text-slate-800 leading-none">{p.stock_quantity}</span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-                  {p.type === 'material_metro' ? 'MT' : 'UN'}
-                </span>
-              </div>
-
-            </div>
-          ))
         )}
-      </div>
 
-      {/* 4. Floating Action Button (FAB) */}
-      <button
-        onClick={() => {
-          if (isAdding) resetForm();
-          setIsAdding(!isAdding);
-        }}
-        className="fixed bottom-24 right-6 w-14 h-14 bg-blue-600 rounded-full text-white shadow-xl shadow-blue-300 flex items-center justify-center hover:bg-blue-700 active:scale-90 transition-all z-50"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
-      </button>
-
-      {/* Modal Form */}
-      {isAdding && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 animate-in fade-in">
-          <form onSubmit={handleSubmit} className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 animate-in slide-in-from-bottom-10">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-xl text-slate-800">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
-              <button type="button" onClick={() => setIsAdding(false)} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-              </button>
+        {/* 3. Main Product List */}
+        <div className="space-y-3">
+          {filteredProducts.length === 0 ? (
+            <div className="text-center py-12 opacity-50">
+              <p className="font-medium text-slate-400">Nenhum produto encontrado</p>
             </div>
+          ) : (
+            filteredProducts.map(p => (
+              <div key={p.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 active:scale-[0.99] transition-transform" onClick={() => handleEdit(p)}>
 
-            <div>
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nome</label>
-              <input
-                required
-                autoFocus
-                className="w-full text-lg font-bold border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-slate-800 placeholder-slate-300 transition-colors"
-                value={formData.name}
-                onChange={e => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Nome do item..."
-              />
-            </div>
+                {/* Icon */}
+                <div className="w-14 h-14 bg-slate-50 rounded-2xl flex-shrink-0 flex items-center justify-center text-slate-400 border border-slate-100">
+                  {p.type === 'material_metro' ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z" /><path d="m14.5 12.5 2-2" /><path d="m11.5 9.5 2-2" /><path d="m8.5 6.5 2-2" /><path d="m17.5 15.5 2-2" /></svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" /></svg>
+                  )}
+                </div>
 
-            <div className="grid grid-cols-2 gap-4">
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-slate-800 text-base truncate">{p.name}</h3>
+                  <p className="text-xs text-slate-500 font-medium">R$ {p.sale_price.toFixed(2)}</p>
+                </div>
+
+                {/* Quantity */}
+                <div className="text-right flex flex-col items-end">
+                  <span className="text-2xl font-bold text-slate-800 leading-none">{p.stock_quantity}</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+                    {p.type === 'material_metro' ? 'MT' : 'UN'}
+                  </span>
+                </div>
+
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* 4. Floating Action Button (FAB) */}
+        <button
+          onClick={() => {
+            if (isAdding) resetForm();
+            setIsAdding(!isAdding);
+          }}
+          className="fixed bottom-28 right-6 w-14 h-14 bg-blue-600 rounded-full text-white shadow-xl shadow-blue-300 flex items-center justify-center hover:bg-blue-700 active:scale-90 transition-all z-50"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+        </button>
+
+        {/* Modal Form */}
+        {isAdding && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 animate-in fade-in">
+            <form onSubmit={handleSubmit} className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 animate-in slide-in-from-bottom-10">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-xl text-slate-800">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
+                <button type="button" onClick={() => setIsAdding(false)} className="p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                </button>
+              </div>
+
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Qtd Atual</label>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nome</label>
                 <input
-                  type="number"
                   required
-                  step="0.01" // Enable decimals for meters
-                  className="w-full p-3 mt-1 bg-slate-50 text-center font-bold text-slate-700 rounded-xl outline-none focus:ring-2 ring-blue-100"
-                  value={formData.stock_quantity}
-                  onChange={e => setFormData({ ...formData, stock_quantity: parseFloat(e.target.value) })}
+                  autoFocus
+                  className="w-full text-lg font-bold border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-slate-800 placeholder-slate-300 transition-colors"
+                  value={formData.name}
+                  onChange={e => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Nome do item..."
                 />
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tipo</label>
-                <div className="flex bg-slate-100 p-1 rounded-xl mt-1">
-                  {[
-                    { val: 'unidade' as ProductType, label: 'UN' },
-                    { val: 'material_metro' as ProductType, label: 'MT' }
-                  ].map(u => (
-                    <button
-                      key={u.val}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, type: u.val })}
-                      className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.type === u.val ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
-                    >
-                      {u.label}
-                    </button>
-                  ))}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Qtd Atual</label>
+                  <input
+                    type="number"
+                    required
+                    step="0.01" // Enable decimals for meters
+                    className="w-full p-3 mt-1 bg-slate-50 text-center font-bold text-slate-700 rounded-xl outline-none focus:ring-2 ring-blue-100"
+                    value={formData.stock_quantity}
+                    onChange={e => setFormData({ ...formData, stock_quantity: parseFloat(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tipo</label>
+                  <div className="flex bg-slate-100 p-1 rounded-xl mt-1">
+                    {[
+                      { val: 'unidade' as ProductType, label: 'UN' },
+                      { val: 'material_metro' as ProductType, label: 'MT' }
+                    ].map(u => (
+                      <button
+                        key={u.val}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, type: u.val })}
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.type === u.val ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
+                      >
+                        {u.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Custo</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-600 font-medium"
-                  value={formData.cost_price}
-                  onChange={e => setFormData({ ...formData, cost_price: parseFloat(e.target.value) })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Custo</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-600 font-medium"
+                    value={formData.cost_price}
+                    onChange={e => setFormData({ ...formData, cost_price: parseFloat(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Venda</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-800 font-bold"
+                    value={formData.sale_price}
+                    onChange={e => setFormData({ ...formData, sale_price: parseFloat(e.target.value) })}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Venda</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-800 font-bold"
-                  value={formData.sale_price}
-                  onChange={e => setFormData({ ...formData, sale_price: parseFloat(e.target.value) })}
-                />
-              </div>
-            </div>
 
-            <div className="pt-2">
-              <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-200 active:scale-95 transition-all">
-                Salvar Item
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-    </div>
+              <div className="pt-2">
+                <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-200 active:scale-95 transition-all">
+                  Salvar Item
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
+    </PageTransition>
   );
 };
 

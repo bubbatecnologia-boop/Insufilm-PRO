@@ -126,12 +126,15 @@ export const db = {
       .order('date', { ascending: false });
 
     if (month) {
-      // e.g. 2023-10
+      // e.g. '2023-10'
       const start = `${month}-01`;
-      // easy hack for end of month: look for less than next month
-      // or just simple string match if date column is date only.
-      // Assuming date is 'YYYY-MM-DD'
-      query = query.gte('date', start).lte('date', `${month}-31`);
+
+      // Calculate last day of the month correctly
+      const [y, m] = month.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate(); // Day 0 of next month is last day of current
+      const end = `${month}-${lastDay}`;
+
+      query = query.gte('date', start).lte('date', end);
     }
 
     const { data, error } = await query;
