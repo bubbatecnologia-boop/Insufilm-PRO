@@ -62,6 +62,7 @@ export interface Transaction {
   description: string;
   amount: number;
   cost_amount?: number;
+  category?: string;
   type: TransactionType;
   status: TransactionStatus;
   date: string; // YYYY-MM-DD

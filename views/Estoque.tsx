@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Product, ProductType } from '../types';
 import { db } from '../lib/database';
 import { supabase } from '../lib/supabase';
@@ -17,6 +18,7 @@ const Estoque: React.FC<EstoqueProps> = ({ onUpdate }) => {
 
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // New States for Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -99,6 +101,7 @@ const Estoque: React.FC<EstoqueProps> = ({ onUpdate }) => {
       min_stock_alert: 5
     });
     setEditingId(null);
+    setIsDeleting(false);
   };
 
   const handleEdit = (product: Product) => {
@@ -250,9 +253,9 @@ const Estoque: React.FC<EstoqueProps> = ({ onUpdate }) => {
           <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
         </button>
 
-        {/* Modal Form */}
-        {isAdding && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 animate-in fade-in">
+        {/* Modal Form - Portaled to escape stacking context */}
+        {isAdding && createPortal(
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9999] flex items-end sm:items-center justify-center p-4 animate-in fade-in">
             <form onSubmit={handleSubmit} className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 animate-in slide-in-from-bottom-10">
               <div className="flex justify-between items-center">
                 <h3 className="font-bold text-xl text-slate-800">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
@@ -307,34 +310,105 @@ const Estoque: React.FC<EstoqueProps> = ({ onUpdate }) => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Custo</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-600 font-medium"
-                    value={formData.cost_price}
-                    onChange={e => setFormData({ ...formData, cost_price: parseFloat(e.target.value) })}
-                  />
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Custo (Un/Ml)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">R$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-full pl-9 pr-3 py-3 mt-1 bg-slate-50 font-bold text-slate-700 rounded-xl outline-none focus:ring-2 ring-blue-100 placeholder-slate-300"
+                      placeholder="0.00"
+                      value={formData.cost_price || ''}
+                      onChange={e => setFormData({ ...formData, cost_price: parseFloat(e.target.value) })}
+                    />
+                  </div>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Preço Venda</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="w-full p-3 mt-1 bg-slate-50 rounded-xl outline-none text-slate-800 font-bold"
-                    value={formData.sale_price}
-                    onChange={e => setFormData({ ...formData, sale_price: parseFloat(e.target.value) })}
-                  />
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Venda (Un/Ml)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500 text-sm font-bold">R$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-full pl-9 pr-3 py-3 mt-1 bg-slate-50 font-bold text-slate-700 rounded-xl outline-none focus:ring-2 ring-emerald-100 placeholder-slate-300"
+                      placeholder="0.00"
+                      value={formData.sale_price || ''}
+                      onChange={e => setFormData({ ...formData, sale_price: parseFloat(e.target.value) })}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="pt-2">
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-xl shadow-blue-200 active:scale-95 transition-all">
-                  Salvar Item
-                </button>
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Alerta de Estoque Mínimo</label>
+                <div className="flex items-center gap-4 mt-1 bg-slate-50 p-2 rounded-xl">
+                  <input
+                    type="range"
+                    min="1"
+                    max="50"
+                    className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    value={formData.min_stock_alert}
+                    onChange={e => setFormData({ ...formData, min_stock_alert: parseInt(e.target.value) })}
+                  />
+                  <span className="text-sm font-bold text-slate-600 w-8 text-center">{formData.min_stock_alert}</span>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between gap-4">
+                {isDeleting ? (
+                  <div className="flex w-full gap-3 animate-in fade-in slide-in-from-bottom-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleting(false)}
+                      className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        console.log('Attempting delete for:', editingId);
+                        const { error } = await db.deleteProduct(editingId!);
+                        if (error) {
+                          alert('Erro ao excluir: Produto em uso ou erro de sistema.');
+                          setIsDeleting(false);
+                          return;
+                        }
+                        await fetchProducts();
+                        setIsAdding(false);
+                        setIsDeleting(false);
+                      }}
+                      className="flex-1 py-3.5 bg-red-600 text-white rounded-xl font-bold shadow-lg shadow-red-200 hover:bg-red-700 transition-colors"
+                    >
+                      Confirmar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {editingId && (
+                      <button
+                        type="button"
+                        onClick={() => setIsDeleting(true)}
+                        className="p-3.5 rounded-xl text-red-500 hover:bg-red-50 transition-colors"
+                        title="Excluir Produto"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                      </button>
+                    )}
+
+                    <button
+                      type="submit"
+                      className={`flex-1 py-3.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-2 ${!editingId ? 'w-full' : ''}`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+                      {editingId ? 'Salvar Alterações' : 'Adicionar Produto'}
+                    </button>
+                  </>
+                )}
               </div>
             </form>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     </PageTransition>

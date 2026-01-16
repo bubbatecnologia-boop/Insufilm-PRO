@@ -39,13 +39,14 @@ export const db = {
     if (error) console.error('Error updating product:', error);
   },
 
-  deleteProduct: async (id: string): Promise<void> => {
+  deleteProduct: async (id: string): Promise<{ error: any }> => {
     const { error } = await supabase
       .from('products')
       .delete()
       .eq('id', id);
 
     if (error) console.error('Error deleting product:', error);
+    return { error };
   },
 
   // --- CLIENTS ---

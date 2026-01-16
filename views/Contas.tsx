@@ -113,7 +113,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
     const year = dueDate.getFullYear();
     const month = String(dueDate.getMonth() + 1).padStart(2, '0');
     const day = String(dueDate.getDate()).padStart(2, '0');
-    const dateStr = `${year} -${month} -${day} `;
+    const dateStr = `${year}-${month}-${day}`;
 
     // Logic: If Variable, amount is 0 (signaling "Needs Value")
     const finalAmount = newBill.type === 'Fixa' ? (parseFloat(newBill.amount) || 0) : 0;
@@ -145,7 +145,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
     const year = today.getFullYear();
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const day = String(today.getDate()).padStart(2, '0');
-    const dateStr = `${year} -${month} -${day} `;
+    const dateStr = `${year}-${month}-${day}`;
 
     await db.addTransaction({
       organization_id: orgId,
@@ -179,7 +179,7 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
     }
   };
 
-  const pending = transactions.filter(t => t.status === 'pending');
+  const pending = transactions.filter(t => t.status === 'pending' && t.type === 'expense');
   // Include both 'completed' (old bills) and 'paid' (sales/new bills) in History, sorted by date DESC
   const completed = transactions
     .filter(t => t.status === 'completed' || t.status === 'paid')
@@ -410,29 +410,48 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
                     return (
                       <div
                         key={c.id}
-                        className={`bg - white p - 5 rounded - r - xl rounded - l - md shadow - sm flex items - center justify - between border - l - [6px] ${accentBorder} transition - all duration - 500 ${isAnimating ? 'scale-105 bg-green-50 border-green-500 opacity-0 translate-x-full' : 'opacity-100 hover:shadow-md'} `}
+                        className={`bg-white py-4 px-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between transition-all duration-300 mb-2.5 group ${isAnimating ? 'scale-95 opacity-0 translate-x-full' : 'opacity-100 hover:shadow-md hover:border-blue-100'}`}
                       >
 
                         {/* Left: Info */}
-                        <div>
-                          <h4 className={`font - bold text - base transition - colors ${isAnimating ? 'text-green-700' : 'text-slate-800'} `}>
-                            {isAnimating ? 'PAGO COM SUCESSO!' : c.description}
-                          </h4>
-                          <p className={`text - xs font - bold mt - 1 uppercase tracking - wide flex items - center gap - 1.5 ${isAnimating ? 'hidden' : statusColor} `}>
-                            {!isAnimating && vencida && !isVariableNeedValue && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>}
-                            {!isAnimating && isHoje && !isVariableNeedValue && <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>}
+                        <div className="flex items-center gap-3.5">
+                          {/* Icon Status Box */}
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-sm border ${isAnimating ? 'bg-green-100 border-green-200 text-green-600' :
+                            isVariableNeedValue ? 'bg-amber-50 border-amber-100 text-amber-500' :
+                              vencida ? 'bg-red-50 border-red-100 text-red-500' :
+                                isHoje ? 'bg-orange-50 border-orange-100 text-orange-500' :
+                                  'bg-blue-50 border-blue-100 text-blue-500'
+                            }`}>
+                            {isAnimating ? <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> :
+                              isVariableNeedValue ? <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg> :
+                                vencida ? <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg> :
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                            }
+                          </div>
 
-                            {!isAnimating && (
-                              isVariableNeedValue ? 'Aguardando Valor' :
-                                isHoje ? 'Vence Hoje!' :
-                                  vencida ? `Venceu dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}` :
-                                    `Vence dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}`
-                            )}
-                          </p >
-                        </div >
+                          <div>
+                            <h4 className={`font-bold text-base transition-colors ${isAnimating ? 'text-green-700' : 'text-slate-800'}`}>
+                              {isAnimating ? 'Conta Paga!' : c.description}
+                            </h4>
+
+                            <p className={`text-[10px] font-bold uppercase tracking-wide flex items-center gap-1.5 ${isAnimating ? 'hidden' :
+                              isVariableNeedValue ? 'text-amber-500' :
+                                vencida ? 'text-red-500' :
+                                  isHoje ? 'text-orange-500' :
+                                    'text-slate-400'
+                              }`}>
+                              {!isAnimating && (
+                                isVariableNeedValue ? 'Defina o valor' :
+                                  isHoje ? 'Vence Hoje!' :
+                                    vencida ? `Venceu dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}` :
+                                      `Vence dia ${new Date(c.date).getUTCDate()}/${new Date(c.date).getUTCMonth() + 1}`
+                              )}
+                            </p>
+                          </div>
+                        </div>
 
                         {/* Right: Actions */}
-                        < div className="flex items-center gap-4" >
+                        <div className="flex items-center gap-4">
 
                           {/* Case 1: Variable / Needs Value */}
                           {
@@ -442,19 +461,19 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
                                   <input
                                     autoFocus
                                     type="number"
-                                    className="w-24 p-2 bg-white border-2 border-amber-200 rounded-lg text-lg outline-none font-bold text-slate-800 text-center shadow-sm focus:border-amber-400"
+                                    className="w-24 p-2 bg-white border-2 border-amber-200 rounded-xl text-lg outline-none font-bold text-slate-800 text-center shadow-sm focus:border-amber-400"
                                     placeholder="R$?"
                                     value={tempValue}
                                     onChange={e => setTempValue(e.target.value)}
                                   />
-                                  <button onClick={() => handleUpdateValor(c.id)} className="bg-amber-500 text-white w-10 h-10 rounded-lg flex items-center justify-center shadow-md active:scale-95 transition-transform">
+                                  <button onClick={() => handleUpdateValor(c.id)} className="bg-amber-500 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-transform">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                   </button>
                                 </div>
                               ) : (
                                 <button
                                   onClick={() => setEditingValueId(c.id)}
-                                  className="bg-amber-50 text-amber-700 px-4 py-2 rounded-lg text-sm font-bold border border-amber-200 shadow-sm hover:bg-amber-100 hover:shadow-md transition-all active:scale-95"
+                                  className="bg-amber-50 text-amber-700 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wide border border-amber-100 shadow-sm hover:bg-amber-100 transition-all active:scale-95"
                                 >
                                   Definir Valor
                                 </button>
@@ -463,27 +482,30 @@ const Contas: React.FC<ContasProps> = ({ onUpdate }) => {
                               // Case 2: Defined Value
                               <>
                                 {!isAnimating && (
-                                  <span className={`font-black text-base ${vencida ? 'text-red-600' : 'text-slate-700'}`}>
-                                    R$ {c.amount.toFixed(2)}
-                                  </span>
+                                  <div className="text-right">
+                                    <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Valor</span>
+                                    <span className={`font-black text-lg ${vencida ? 'text-red-500' : 'text-slate-900'}`}>
+                                      R$ {c.amount.toFixed(2)}
+                                    </span>
+                                  </div>
                                 )}
 
                                 <button
                                   onClick={() => togglePago(c)}
                                   disabled={isAnimating}
-                                  className={`rounded-full flex items-center justify-center text-white shadow-md transition-all duration-500 ease-out
-                              ${isAnimating
-                                      ? 'w-12 h-12 bg-green-500 rotate-[360deg] scale-125'
-                                      : `w-10 h-10 active:scale-90 hover:scale-105 bg-emerald-500 shadow-emerald-200`
+                                  className={`rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all duration-300
+                                    ${isAnimating
+                                      ? 'w-12 h-12 bg-green-500 scale-110 opacity-0'
+                                      : 'w-10 h-10 bg-slate-900 text-emerald-400 hover:bg-slate-800 shadow-slate-200'
                                     }`}
                                 >
-                                  <svg xmlns="http://www.w3.org/2000/svg" width={isAnimating ? 24 : 20} height={isAnimating ? 24 : 20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                                 </button>
                               </>
                             )
                           }
-                        </div >
-                      </div >
+                        </div>
+                      </div>
                     );
                   })}
                 </div >

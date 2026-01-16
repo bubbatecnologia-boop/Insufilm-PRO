@@ -333,16 +333,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                 </div>
             </div>
 
-            {/* Dev Mode Bypass */}
-            <div className="mt-8 z-10 animate-in fade-in slide-in-from-bottom-4 delay-700 duration-700">
-                <button
-                    onClick={onLogin}
-                    className="group flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-white/60 hover:text-white text-xs backdrop-blur-sm transition-all"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:text-amber-300 transition-colors"><path d="m12 14 4-4" /><path d="M3.34 19a10 10 0 1 1 17.32 0" /></svg>
-                    Acessar Demo (Sem Login)
-                </button>
-            </div>
+
 
         </div>
     );
